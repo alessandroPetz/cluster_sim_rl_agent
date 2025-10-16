@@ -1,0 +1,9 @@
+*.csv
+*.trace
+*.zip
+logs/
+models/
+old/
+history_summaries/
+__pycache__/
+*.log
