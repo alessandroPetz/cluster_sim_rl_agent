@@ -8,7 +8,7 @@ The goal is to minimize energy consumption while maintaining system performance,
 ## Experiment 1
 The RL agent is **trained on one workloads** and **tested on the same workload**, in order to evaluate its **capability of doing better than a HARD powercap rule**.
 
-
+## Experiment 2
 The RL agent is **trained on four workloads** (`1–4`) and **tested on a fifth workload (`5`)** that it has **never seen before**, in order to evaluate its **generalization capability**.
 
 
