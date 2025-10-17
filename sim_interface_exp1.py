@@ -223,6 +223,10 @@ class SimInterface:
         script_path = Path(__file__).resolve()
         workspace = script_path.parent.parent
 
+        # check if exist tmp folder
+        tmp_dir = os.path.join(workspace, "tmp")
+        os.makedirs(tmp_dir, exist_ok=True)
+
         # Variabili d'ambiente
         env_eargmd = os.environ.copy()
         env_eargmd["EAR_ETC"] = f"{workspace}/EAR/etc"
@@ -274,7 +278,7 @@ class SimInterface:
             env=env_cluster_sim,
             stdout=open(f"{workspace}/tmp/cluster_sim.log", "w"),
             stderr=subprocess.STDOUT,
-            cwd=f"{workspace}/RL-Agent"
+            cwd = script_path.parent
         )
 
         print("[SImInterface] >>> All the processes are running.")
