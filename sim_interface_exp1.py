@@ -218,7 +218,6 @@ class SimInterface:
         print("[SimInterface] >>> Start with the simulation processes (eargmd, batsim, batsche, cluster_sim")
 
         # processes setting
-        # workspace = "/home/apetrella/Workspace/Barcelona"
         # Workspace is the folder that cotain the folder that contain the python script
         script_path = Path(__file__).resolve()
         workspace = script_path.parent.parent

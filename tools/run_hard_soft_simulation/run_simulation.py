@@ -3,6 +3,7 @@ import subprocess
 import os
 import time
 import signal
+from pathlib import Path
 
 def kill_processes_by_name(name: str):
     try:
@@ -28,9 +29,8 @@ kill_processes_by_name("cluster_sim")
 
 
 # Percorso base del progetto
-BASE = "/home/apetrella/Workspace/Barcelona"
-# Cartella dove si trova questo script (così i log finiscono qui)
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+SCRIPT_DIR = Path(__file__).resolve().parent
+BASE = SCRIPT_DIR.parent.parent.parent
 
 # ##############
 # Ho settato cwd = BASE
