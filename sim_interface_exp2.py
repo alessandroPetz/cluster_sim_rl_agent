@@ -155,7 +155,10 @@ class SimInterface:
             header = ['timestamp', 'filename', 'energy', 'end_time','Workload_to_rollout','workload_to_test']       # headers
             nuova_riga = [timestamp, file_path, energy_sum, last_end_time, self.workload_selected, self.workload_to_test]
 
-            output_path = "history_summaries/results.csv"
+            if self.mode == "test":
+                output_path = "history_summaries/results_test.csv"
+            else:
+                output_path = "history_summaries/results_train.csv"
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
             # Controlla se il file esiste già
