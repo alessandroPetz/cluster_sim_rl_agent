@@ -1,7 +1,3 @@
-# In this experiment we will train the agent with 4 different workload 
-# and we test it with a 5th workload, never seen before
-
-
 import subprocess
 import json
 import os
@@ -13,9 +9,8 @@ import select
 import socket
 import psutil
 from datetime import datetime
+from pathlib import Path
 import random
-
-WORKLOAD_TO_TEST = 5
 
 # Riprendo le stesse classi dati che avevi nel tuo esempio:
 class GreedyBytes:
@@ -50,8 +45,7 @@ class SimInterface:
                  cluster_max_power=800_000,
                  min_node_power=750,
                  host='localhost', 
-                 port=12345,
-                 # Mantieni un eventuale stato interno o connessione al simulatore
+                 port=12345
                  ):
         """
         - cmd: percorso (o nome) dell’eseguibile C++, es. "./sim"
@@ -65,118 +59,22 @@ class SimInterface:
         self.min_node_power = min_node_power
         self.host = host
         self.port = port
-        self.workload_for_training = 1
-        self.workload_to_test = WORKLOAD_TO_TEST
-        self.test_mode = False
-
-        # self.kill_all_processes() # distruggo eventuali processi attivi
-        # self.launch_all_processes()
-        # self._connect_cpp_socket(host, port)
 
         self.step_counter = 0
         self.status = None
         self.row_summary_file_status = 0
 
-    def _connect_cpp_socket(self, host='localhost', port=12345, timeout=5, delay=0.5):
-        """
-        Tenta di connettersi ripetutamente alla socket finché non è pronta,
-        o finché non scade il timeout (in secondi).
-        """
-        print("MI connetto all socket..")
-        start_time = time.time()
-        while True:
-            try:
-                self.cpp_sock = socket.create_connection((host, port))
-                self.cpp_file_in = self.cpp_sock.makefile('r')
-                self.cpp_file_out = self.cpp_sock.makefile('w')
-                print(f"[SimInterface] Connesso al socket {host}:{port}")
-                return
-            except ConnectionRefusedError:
-                if time.time() - start_time > timeout:
-                    self.close()
-                    raise RuntimeError(f"Timeout: impossibile connettersi a {host}:{port} dopo {timeout} secondi")
-                    
-                # print(f"[SimInterface] Socket non pronta, ritento tra {delay} secondi...")
-                time.sleep(delay)
+        self.mode = "train"
+        self.workload_to_test = 5
+        self.workloads_to_rollout = [1,2,3,4]
+        self.workload_selected = None
 
-    def launch_all_processes(self):
-
-        
-
-        if self.test_mode == True:
-            self.workload_for_training = self.workload_to_test
-        else:
-            self.workload_for_training = random.choice([n for n in range(1, 6) if n != self.workload_to_test])
-
-        print("=====================================================================")
-        print("self.test_mode = ",self.test_mode)
-        print("self.workload_to_test = ",self.workload_to_test)
-        print(f"Leggo il file: leggo 1024_nodes_v{self.workload_for_training}.json")
-        print("=====================================================================")
-
-        # Lancio il processo C++ in lettura/scrittura su pipe
-        workspace = "/home/apetrella/Workspace/Barcelona"
-
-        #   TODO Lanciare un numero random tra 1 e 5, 
-        #   finche non diverso da quello che usiamo per il test.
-        os.makedirs(f"{workspace}/tmp", exist_ok=True)
-
-        # Variabili d'ambiente
-        env_eargmd = os.environ.copy()
-        env_eargmd["EAR_ETC"] = f"{workspace}/EAR/etc"
-
-        env_cluster_sim = os.environ.copy()
-        env_cluster_sim["CLUSTER_SIM_NUM_NODES"] = "1024"
-        env_cluster_sim["CLUSTER_SIM_DEF_POWERCAP"] = "750"
-
-        print("[SimINterface] Avvio i processi...")
-        self.eargmd_proc = subprocess.Popen(
-            [f"{workspace}/source/ear_private/src/global_manager/eargmd"],
-            stdout=open(f"{workspace}/tmp/eargmd.log", "w"),
-            stderr=subprocess.STDOUT,
-            env=env_eargmd
-        )
-        
-        time.sleep(1)  # 🔁 Attendi un po' per sicurezza (puoi mettere anche un controllo log)
-
-        #print("[]>>> Avvio batsim...")
-        self.batsim_proc = subprocess.Popen(
-            [
-                "batsim",
-                "-p", f"{workspace}/input_files/experiment2/cluster_energy_1024.xml",
-                "--mmax-workload",
-                "-w", f"{workspace}/input_files/experiment2/1024_nodes_v{self.workload_for_training}.json",
-                "-E"
-            ],
-            stdout=open(f"{workspace}/tmp/batsim.log", "w"),
-            stderr=subprocess.STDOUT
-        )
-        time.sleep(1)
-
-        #print(">>> Avvio batsched...")
-        self.batsched_proc = subprocess.Popen(
-            ["batsched", "-v", "easy_bf", "--verbosity=debug"],
-            stdout=open(f"{workspace}/tmp/batsched.log", "w"),
-            stderr=subprocess.STDOUT
-        )
-        time.sleep(1)
-
-        #print(">>> Avvio cluster_sim...")
-        self.cluster_sim_proc = subprocess.Popen(
-            [
-                f"{workspace}/source/ear_private/src/tools/cluster_sim",
-                "test_tag",
-                f"../input_files/experiment2/cpu_1k_powerusage_v{self.workload_for_training}.txt"   
-            ],
-            env=env_cluster_sim,
-            stdout=open(f"{workspace}/tmp/cluster_sim.log", "w"),
-            stderr=subprocess.STDOUT
-        )
-
-        print("[SimInterface] Tutti i processi sono stati avviati.")
+    def set_mode(self, mode):
+        self.mode = mode
+        print(f"[SimInterface] Mode set to {mode}")
 
     def kill_all_processes(self):
-        print("[SimInterface] Terminazione dei processi...")
+        print("[SimInterface] Killing old simulation processes: batsim, batsched, eargmd, cluster_sim")
 
         for proc, name in [
             (getattr(self, "eargmd_proc", None), "eargmd"),
@@ -187,23 +85,24 @@ class SimInterface:
         ]:
             if proc and proc.poll() is None:  # Se è ancora attivo
                 try:
-                    print(f"[SimInterface] Killing {name} (pid={proc.pid})")
+                    #print(f"[SimInterface] Killing {name} (pid={proc.pid})")
                     proc.terminate()
                     proc.wait(timeout=3)
                 except subprocess.TimeoutExpired:
-                    print(f"[SimInterface] Kill forzato di {name} (pid={proc.pid})")
+                    #print(f"[SimInterface] Kill forzato di {name} (pid={proc.pid})")
                     proc.kill()
                 except Exception as e:
-                    print(f"[SimInterface] Errore durante kill di {name}: {e}")
+                    pass
+                    #print(f"[SimInterface] Errore durante kill di {name}: {e}")
 
-    def kill_all_named_processes(self,names):
-        print("[SimInterface] Terminazione di processi esterni...")
 
+        # Here we kill processes of other simulation still alived for some reason    
+        # print("[SimInterface] Kill external processes")
         for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
             try:
-                for name in names:
+                for name in ["eargmd","batsim","batsched","cluster_sim"]:
                     if name in proc.info['name'] or any(name in arg for arg in proc.info.get('cmdline', [])):
-                        print(f"[SimInterface] Killing {name} (pid={proc.pid})")
+                        # print(f"[SimInterface] Killing {name} (pid={proc.pid})")
                         proc.terminate()
                         try:
                             proc.wait(timeout=3)
@@ -213,69 +112,9 @@ class SimInterface:
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
 
-    def read_metric_file(self):
-
-
-        # TODO Leggere il file
-        # inizio con righe = 0
-        # se sono piu righe di quelle che avevo gia letto, sommo tutto  e aggiorno valore
-        # se sono uguali, ritorno 0
-        # arrivato a ultima riga = IDLE, fininsco il file i righe = 0 da capo
-
-        # la metrica che viene letta non è detto che sia giusta,
-        # siamo sicuri che venga aggiornato il file in tempo????
-
-        # me la faccio passare dal eargmd?? MOLTO MEGLIO
-
-        # read the summry file and retrun the last energy metric *-1
+    def process_summary_and_save_results(self, file_path):
         
-        #time.sleep(0.2)
-        files = glob.glob("trace*summary.csv")
-
-        try:
-            if files and os.path.exists(files[0]):
-                # print("[Python] leggo metriche in", files[0])
-                with open(files[0], newline='') as csvfile:
-                    reader = list(csv.DictReader(csvfile, delimiter=';'))
-                    # se il file non ha righe o abbiamo gia letto l'ultima riga
-                    if not reader or self.row_summary_file_status == len(reader):
-                        energy = 0
-                        start_time = 0
-                        end_time = 0
-                        job_id = -1
-                    else:
-                            
-                        # ci sono nuovi valori da passare come metrica
-                        # per ora passo solo l'ultimo.... 
-                        # TODO passare tutti quelli non letti
-                        energy = 0
-                        diff = len(reader) - self.row_summary_file_status
-                        for i in range(1, diff + 1):
-                            row = reader[-i]
-                            energy = energy + float(row['energy'])
-                        last_row = reader[-1]
-                        #energy = float(last_row['energy'])
-                        #start_time = int(last_row['start_time'])
-                        #end_time = int(last_row['end_time'])
-                        job_id = last_row['job_id']
-                        self.row_summary_file_status = len(reader)
-
-
-                #print("watts =", e, ", sec =", s)
-                energy = -1 * energy
-                # print("energy = ", energy)
-                return energy, job_id
-            else:
-                print("[Python] file summary non trovato. Episodio troncato.")
-                return 0,0
-        except:
-            print("[Python] file summary non trovato. Episodio troncato.")
-            return 0,0
-
-
-    def process_csv_and_save_results(self, file_path):
-        
-        #print(file_path)
+        # Read Info in smmary file
         energy_sum = 0.0
         last_end_time = None
         last_job_id = -1
@@ -283,173 +122,322 @@ class SimInterface:
             reader = csv.DictReader(csvfile,delimiter=';')
             for row in reader:
                 #print("Riga letta:", row)
-                # Somma energy
+                # Sum of energy
                 try:
                     energy_sum += float(row['energy'].strip())
                 except (KeyError, ValueError):
                     pass
 
-                # Ultimo end_time
+                # Last end_time
                 try:
                     last_end_time = float(row['end_time'].strip())
                 except (KeyError, ValueError):
                     pass
-
                 # Ultimo job_id
                 try:
                     last_job_id = row['job_id'].strip()
                 except (KeyError, ValueError):
-                    # qualcosa si è incagliato
-                    # a volte viene generato e non ha neanche una riga. quindi va in errore.
-                    # eliminiamo metric files
-                    # poi la simulazione ripartitrà
-                    self._remove_metric_files()
+                    # there is no line in csv (only the headers)
                     last_job_id = -1
+                    
+                    
+                    
         
-        # solo se era terminata la simulazione, altrimenti non lo salvo
-        # print(last_job_id)
-        if  last_job_id == "IDLE" :
+        # If the simulation is terminated (aka last_job_id == "IDLE"), save data in history/results.csv
+        if last_job_id == "IDLE":               
             
-            print(f"Somma energy: {energy_sum}")
-            print(f"Ultimo end_time: {last_end_time}")
+            print(f"[SimInterface] Total energy consumed: {energy_sum}")
+            print(f"[SimInterface] Last  end_time: {last_end_time}")
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             
-            # salvo su file i risultati
-            
-            # Percorso del file di output
-            if self.test_mode == False:
-                output_path = "history_summaries/results_training.csv"
-            else:
-                output_path = "history_summaries/results.csv"
-                
-            # Intestazioni
-            header = ['timestamp', 'filename', 'energy', 'end_time','workload_n']
-            nuova_riga = [timestamp, file_path, energy_sum, last_end_time, self.workload_for_training]
-            
+            # save the results
 
+            header = ['timestamp', 'filename', 'energy', 'end_time','Workload_to_rollout','workload_to_test']       # headers
+            nuova_riga = [timestamp, file_path, energy_sum, last_end_time, self.workload_selected, self.workload_to_test]
 
-            # Crea la cartella se non esiste
+            output_path = "history_summaries/results.csv"
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
             # Controlla se il file esiste già
-            file_esiste = os.path.exists(output_path)
+            file_exist = os.path.exists(output_path)
 
-            # Scrive su file
+            # Write on a file
             with open(output_path, 'a', newline='') as file:
                 writer = csv.writer(file)
 
-                # Se il file non esisteva, scrive l'intestazione
-                if not file_esiste:
+                # If is a new file, write the headers
+                if not file_exist:
                     writer.writerow(header)
 
-                # Scrive i dati
+                # write data
                 writer.writerow(nuova_riga)
 
-            print("Aggiunta riga: ", nuova_riga)
-            print("In PATH: ", output_path)
+            print("[SimInterface] Row added in rusults.txt")
 
-            # CHJECK aggiungo reset 
-            # nel caso abbia registrato i numeri di un test, al giro dopo siamo sicuramnete in train di nuovo
-            if self.test_mode == True:
-                self.test_mode = False
+    def remove_metric_files_and_save_summary(self):
 
+        print("[SimInterface] Remove metric/trace files and save summary.csv in history folder")
 
-    def _remove_metric_files(self):
+        # move summary file in history folder and remove other files
 
-        # sposto il file summary in history, ed elimino gli altri file
+        current_dir = os.getcwd()                                       # current folder
+        history_dir = os.path.join(current_dir, 'history_summaries')    # history filder
 
-        # Percorso corrente
-        current_dir = os.getcwd()
-
-        # Cartella di destinazione
-        history_dir = os.path.join(current_dir, 'history_summaries')
-
-        # Crea la cartella 'history' se non esiste
-        if not os.path.exists(history_dir):
+        # create history folder 
+        if not os.path.exists(history_dir):                             
             os.makedirs(history_dir)
 
-        # Cerca file che contengono 'summary' nel nome
+        # Find summary file move it in history folder and 
+        # if is completed, save the results in history/results.csv
         for filename in os.listdir(current_dir):
             file_path = os.path.join(current_dir, filename)
             if os.path.isfile(file_path) and 'summary' in filename.lower():
 
-                self.process_csv_and_save_results(file_path)
+                # process summary csv and in case save results
+                self.process_summary_and_save_results(file_path)       
 
-                # Sposta il file nella cartella 'history'
+                # move summary in history folder
                 dest_path = os.path.join(history_dir, filename)
                 shutil.move(file_path, dest_path)
-                print(f"Spostato: {filename} → {history_dir}")
+                print(f"[SimInterface]Moved: {filename} → {history_dir}")
         
         
-        # ELIMINO I FILE CSV e TRACE in più
-
+        # Remove other files
         files = (glob.glob("*.csv"))
         try:
             for f in files:
                 if f and os.path.exists(f):
                     os.remove(f)
         except:
-            print("no .csv to remove")
+            pass
+            # print("no .csv to remove")
         try:
             files = (glob.glob("*.trace"))
             for f in files:
                 if f and os.path.exists(f):
                     os.remove(f)
         except:
-            print("no .trace tu remove")
+            pass
+            #print("no .trace tu remove")
 
-    def _read_status_from_cpp(self):
+    def run_simulation(self):
         
-        # leggo il foglio delle metriche, se
-        # se job ID != IDLE
-        #         leggo metrica, done = false
-        # se job ID == IDLE
-        #         leggo ultima riga, done = true
+        # select the right workload
+        if self.mode == "train":
+            self.workload_selected = random.choice(self.workloads_to_rollout)
+        else:
+            self.workload_selected = self.workload_to_test
         
         
-         
-        metric_value, job_id = self.read_metric_file()
+        # To start with the simulation, I have to run 4 external processes
+
+        print("[SimInterface] Start with the simulation processes (eargmd, batsim, batsche, cluster_sim)")
+
+        # processes setting
+        # Workspace is the folder that cotain the folder that contain the python script
+        script_path = Path(__file__).resolve()
+        workspace = script_path.parent.parent
+
+        # check if exist tmp folder
+        tmp_dir = os.path.join(workspace, "tmp")
+        os.makedirs(tmp_dir, exist_ok=True)
+
+        # Variabili d'ambiente
+        env_eargmd = os.environ.copy()
+        env_eargmd["EAR_ETC"] = f"{workspace}/EAR/etc"
+
+        env_cluster_sim = os.environ.copy()
+        env_cluster_sim["CLUSTER_SIM_NUM_NODES"] = "1024"
+        env_cluster_sim["CLUSTER_SIM_DEF_POWERCAP"] = "750"
+
+        #print("[SimInterface] >>> Start eargmd...")
+        self.eargmd_proc = subprocess.Popen(
+            [f"{workspace}/source/ear_private/src/global_manager/eargmd"],
+            stdout=open(f"{workspace}/tmp/eargmd.log", "w"),
+            stderr=subprocess.STDOUT,
+            env=env_eargmd
+        )
+
+        time.sleep(1)
+
+        print(f"[SimInterface] Workload 1024_nodes_v{self.workload_selected}.json is selected")
+        self.batsim_proc = subprocess.Popen(
+            [
+                "batsim",
+                "-p", f"{workspace}/input_files/experiment1/cluster_energy_1024.xml",
+                "--mmax-workload",
+                "-w", f"{workspace}/input_files/experiment2/1024_nodes_v{self.workload_selected}.json",
+                "-E"
+            ],
+            stdout=open(f"{workspace}/tmp/batsim.log", "w"),
+            stderr=subprocess.STDOUT
+        )
+        time.sleep(1)
+
+        #print("[SimInterface] >>> Start batsched...")
+        self.batsched_proc = subprocess.Popen(
+            ["batsched", "-v", "easy_bf", "--verbosity=debug"],
+            stdout=open(f"{workspace}/tmp/batsched.log", "w"),
+            stderr=subprocess.STDOUT
+        )
+        time.sleep(1)
+
+        #print("[SimInterface] >>> Start cluster_sim...")
+        self.cluster_sim_proc = subprocess.Popen(
+            [
+                f"{workspace}/source/ear_private/src/tools/cluster_sim",
+                "test_tag",
+                f"../input_files/experiment2/cpu_1k_powerusage_v{self.workload_selected}.txt" 
+                
+            ],
+            env=env_cluster_sim,
+            stdout=open(f"{workspace}/tmp/cluster_sim.log", "w"),
+            stderr=subprocess.STDOUT,
+            cwd = script_path.parent
+        )
+
+        # print("[SImInterface] >>> All the processes are running.")
+
+    def connect_at_simulation_socket(self, host='localhost', port=12345, timeout=4, delay=0.5):
+        """
+        Try to connect to the simulation socket repeatedly until the timeout expires.
+        """
+        start_time = time.time()
+        while True:
+            try:
+                self.cpp_sock = socket.create_connection((host, port))
+                self.cpp_file_in = self.cpp_sock.makefile('r')
+                self.cpp_file_out = self.cpp_sock.makefile('w')
+                print(f"[SimInterface] Connected at the socket {host}:{port}")
+                return
+            except ConnectionRefusedError:
+                if time.time() - start_time > timeout:
+                    self.close()
+                    raise RuntimeError(f"[SimInterface] Timeout: Impossible to connect at {host}:{port} after {timeout} seconds")
+                    
+                print(f"[SimInterface] Socket not ready, retry in {delay} seconds...")
+                time.sleep(delay)
+
+    def read_reward_from_summary(self):
+
+        # Reading the reward from summry file.
+        # We read the last row in summary file and save the end_time and energy data.
+        # 
+        # For now we are using the energy as a reward, and
+        # We apply REWARD SHAPING:
+        # If the simulation is not finished 
+        #       ->  reward = -1 * energy_last_row * 0.001 
+        # else if is finished
+        #       ->  reward = -1 * total_energy 
+
+        files = glob.glob("trace*summary.csv")
+
+        try:
+            if files and os.path.exists(files[0]):
+                
+                with open(files[0], newline='') as csvfile:
+                    reader = list(csv.DictReader(csvfile, delimiter=';'))
+                    
+                    # If the file does not have new line (Job Submitted in the simulation, we have the reward only if job is submitted) 
+                    # or the file have 0 line (The simulation is started now): 
+                    if not reader or self.row_summary_file_status == len(reader):
+                        time = 0
+                        job_id = -1
+                        energy = 0
+                    
+                    # If the file have at least 1 new line.
+                    # in theory just in one case we have more than one new row, when the simulation is finished, beacuse they produce 2 lines:
+                    # one line for the end of the last job, one line for the idle nodes consuption. It is not a problem because 
+                    # we take every time the last row, and if the simulation is finished, we take the sum of energy of the all the job
+                    else:
+                        last_row = reader[-1]
+                        job_id = last_row['job_id']
+                        self.row_summary_file_status = len(reader)
+
+                        # reward = total energy consumed
+                        if (job_id == "IDLE"):
+                            
+                            time = float(last_row['end_time'])
+                            energy = 0
+                            for i in range(len(reader)):
+                                row = reader[i]
+                                energy = energy + float(row['energy']) 
+
+                        # reward = energy last job * 0.001
+                        else:
+
+                            time = (float(last_row['end_time']) - float(last_row['start_time'])) *0.001
+                            energy = float(last_row['energy'])  * 0.001
+                        
+                        ##### NO SHAPING #####
+                        # time = (float(last_row['end_time']) - float(last_row['start_time'])) 
+                        # energy = float(last_row['energy']) 
+
+                # reward = 1* energy
+                reward = 1* time
+
+                # print("time = ", time)
+                # print("energy = ", energy)
+                # print("metric = ", metric)
+                # print("Job_ID = ", job_id)
+                
+                return reward, job_id
+            
+            else:
+                print("[Python] file summary don't found. Episode to truncate.")
+                return 0,-1
+        except:
+            print("[Python] file summary don't found. Episodie to truncate.")
+            return 0,-1
+
+    def read_status_and_reward_from_simulation(self):
+        
+        # read last row of summary to have reward and last_job_id
+        reward, job_id = self.read_reward_from_summary()
         # print("energy = ",metric_value, ". Job:id =", job_id)
-         
 
-        # simulazione appena iniziata o non ancora terminata
-        # in realtà questa cosa sembra non succedere, perchè ad un certo punt genera 2 righe
-        # quella di fine job e quella di fine simulazione (IDLE)
-        # allora gliela faccio leggere nel caso non si ricevono più dati
+        # In case the simulation is not terminated 
         if job_id != "IDLE":
             
-            # print("processo attivo")
             done = False
             truncated = False
             
             """
-            Legge una riga JSON dalla socket C++ in modo non bloccante.
+            Read a Json line from the socket connected with the simulation processes
             """
             sock_fd = self.cpp_sock.fileno()
             rlist, _, _ = select.select([sock_fd], [], [], 2.0)
 
+            # If no data are sent
             if not rlist:
-                print("[Python] Timeout: nessun dato ricevuto, anche se il processo è ancora vivo")
-                print("simulazione terminata")
-                metric_value, job_id = self.read_metric_file()
-                print("energy = ",metric_value, ". Job:id =", job_id)
+                print("[SimInterface] Timeout: no data recived from socket, even if the simulation processes still alive")
+                print("[SimInterface] Forcing the end of the simulation - Done = True")
+                # metric_value, job_id = self.read_reward_from_summary() #### ???
+                # print("energy = ",metric_value, ". Job:id =", job_id)
                 done = True
                 truncated = False
-                return PowercapStatus(0,0,0,0,0,0,0,[],[],metric_value,done,truncated)
+                return PowercapStatus(0,0,0,0,0,0,0,[],[],reward,done,truncated)
 
             line = self.cpp_file_in.readline()
             # print("[Python] data received from C:", line)
 
             if not line.strip():
-                print("[Python] Socket vuota, anceh se il processo è ancora vivo")
-                # return self._check_for_final_metric_file()
+                print("[SimInterface] Socket empty, even if the simulation processes still alive")
+                print("[SimInterface] Forcing the end of the simulation - Done = True")
+                done = True
+                truncated = False
+                return PowercapStatus(0,0,0,0,0,0,0,[],[],reward,done,truncated)
 
             try:
                 data = json.loads(line)
             except json.JSONDecodeError as e:
-                raise RuntimeError(f"SimInterface: JSON non valido in ingresso dal C++: {e}")
+                print("[SimInterface] JSON not valid, even if the simulation processes still alive")
+                print("[SimInterface] Forcing the end of the simulation - Done = True")
+                done = True
+                truncated = False
+                return PowercapStatus(0,0,0,0,0,0,0,[],[],reward,done,truncated)
 
-            # parsing come prima ...
+            # Parsing of the Json
             total_nodes      = data.get("total_nodes", 0)
             idle_nodes       = data.get("idle_nodes", 0)
             released         = data.get("released", 0)
@@ -471,109 +459,73 @@ class SimInterface:
             return PowercapStatus(
                 total_nodes, idle_nodes, released, requested,
                 total_idle_power, current_power, total_powercap,
-                greedy_nodes, greedy_data_list, metric_value, done, truncated
+                greedy_nodes, greedy_data_list, reward, done, truncated
             )
 
-
+        # The simulatio interminted
         else:
 
-            print("simulazione terminata")
+            print("[SimInterface] Simulation Terminated with no problem")
             done = True
             truncated = False
-            return PowercapStatus(0,0,0,0,0,0,0,[],[],metric_value,done,truncated)
+            return PowercapStatus(0,0,0,0,0,0,0,[],[],reward,done,truncated)
 
-    def _send_action_to_cpp(self, action: dict):
+    def send_action_to_cpp(self, action: dict):
         if self.cpp_file_out.closed:
-            raise RuntimeError("Socket chiusa")
+            raise RuntimeError("Socket closed")
 
         try:
             out_line = json.dumps(action) + "\n"
-            # print(">>> INVIO verso C: ", out_line)
+            # print(">>> sending to simulation: ", out_line)
             self.cpp_file_out.write(out_line)
             self.cpp_file_out.flush()
             # print("[Python] data sent to C:")
         except BrokenPipeError:
-            raise RuntimeError("Errore di scrittura su socket TCP")
+            raise RuntimeError("[SimInterface] Error writing on socket TCP")
 
-    # def reset(self):
-
-
-    #     """
-    #     Chiamiamo il C++ e leggiamo il primo status JSON.
-    #     Non inviamo alcuna azione perché il C++, di solito, manda subito
-    #     il primo powercap_status non appena parte.
-    #     """
-    #     # self.step_counter = 0
-    #     # LEGGO il primo JSON dal C++
-
-    #     while True:
-    #         try:
-    #             print("Dentro RESET")
-    #             self.kill_all_processes()                   # elimino vecchi processi
-    #             # self.kill_all_named_processes(["batsim", "batsched", "eargmd", "cluster_sim"]) 
-    #             print("rimuovo file e salvo")
-    #             self._remove_metric_files()                 # rimuovo i file generati dai processi
-    #             self.row_summary_file_status = 0            # torna a 0
-    #             self.launch_all_processes()                 # lancio i processi
-    #             self._connect_cpp_socket()                  # mi connetto alla socket
-    #             self.status = self._read_status_from_cpp()  # leggo il primo status
-    #             return self.status
-    #         except Exception as e:
-    #             print(f"Errore durante la connessione o lettura: {e}")
-    #             print("Riprovo da capo...\n")
-
-    def reset(self, test_mode=False, workload_to_test=WORKLOAD_TO_TEST):
+    def reset(self):
         """
-        Reset della simulazione.
-        test: bool → True se siamo in modalità test
-        workload_to_test: int → quale workload usare per la fase di test
+        First thing to do when a training starts and when a simulation is terminated and  new one starts
         """
-        self.test_mode = test_mode
-        self.workload_to_test = workload_to_test
+
 
         while True:
+            print("[SimInterface] RESET: start with a new simulation..")
             try:
-                print("[SimInterface] RESET iniziato. test_mode =", self.test_mode, ", workload_to_test =", self.workload_to_test)
-
-                # Termina eventuali processi precedenti
-                self.kill_all_processes()
-                self._remove_metric_files()         # and save reuslts
-                self.row_summary_file_status = 0
-
-                # Avvia nuovi processi e passa i parametri
-                self.launch_all_processes()
-
-                # Connessione alla socket C++
-                self._connect_cpp_socket()
-
-                # Legge il primo status dal simulatore
-                self.status = self._read_status_from_cpp()
+                self.kill_all_processes()                   # kill old processes ["batsim", "batsched", "eargmd", "cluster_sim"]
+                self.remove_metric_files_and_save_summary() # remove all the files generated by simulation processess, and save summary file in history
+                self.run_simulation()                       # run simulation processes
+                self.connect_at_simulation_socket()         # connectin to the socket with the simulation
+                self.row_summary_file_status = 0            # reset the number of the row to read in a sunmmary file 
+                self.status = self.read_status_and_reward_from_simulation()  # read the first status of the Cluster in the simulation
                 return self.status
-
             except Exception as e:
-                print(f"[SimInterface] Errore durante reset: {e}. Riprovo...")
-                time.sleep(1)
+                print(f"Some error occurred during the RESET {e}")
+                print("I'll Retry \n")
 
-    def step(self, action, test_mode=False, workload_to_test=WORKLOAD_TO_TEST):
+    def step(self, action: dict):
+        
         """
-        Esegue un passo di simulazione.
-        action: dict → azione da inviare al simulatore
-        test: bool → modalità test
-        workload_to_test: int → workload da usare
+        1 Step for evrey job submitted and 1 step for every job terminated.
         """
-        self.test_mode = test_mode
-        self.workload_to_test = workload_to_test
 
-        # Invia l'azione al simulatore C++
-        self._send_action_to_cpp(action)
+        # Increase the step counter
+        self.step_counter += 1
+        if (self.step_counter % 500 == 0):
+            print("step = ", self.step_counter)
+        
+        # Send action
+        self.send_action_to_cpp(action)
 
-        # Legge lo stato aggiornato dal simulatore
-        self.status = self._read_status_from_cpp()
-        return self.status
+        # Read action
+        return self.read_status_and_reward_from_simulation()
 
     def close(self):
+
+        print("[SimInterface] Closing the training")
+
         try:
-            if hasattr(self, 'eargmd_proc') and self.eargmd_proc:
+            if hasattr(self, 'eargmd_proc') and self.eargmd_proc and not self.eargmd_proc.stdin.closed:
                 self.eargmd_proc.stdin.close()
             if hasattr(self, 'eargmd_proc') and self.eargmd_proc:
                 self.eargmd_proc.wait(timeout=5)
@@ -590,7 +542,6 @@ class SimInterface:
                 pass
             # Kill everything else
             self.kill_all_processes()
-            self.kill_all_named_processes(["batsim", "batsched", "eargmd", "cluster_sim"])
 
             try:
                 self.cpp_file_in.close() # chiudiamo le socket

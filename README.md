@@ -12,3 +12,4 @@ The RL agent is **trained on one workloads** and **tested on the same workload**
 The RL agent is **trained on four workloads** (`1–4`) and **tested on a fifth workload (`5`)** that it has **never seen before**, in order to evaluate its **generalization capability**.
 
 
+for more info write at alessandro.petrella@unibo.it
