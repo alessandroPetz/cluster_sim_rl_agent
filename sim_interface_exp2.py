@@ -65,8 +65,8 @@ class SimInterface:
         self.row_summary_file_status = 0
 
         self.mode = "train"
-        self.workload_to_test = 5
-        self.workloads_to_rollout = [1,2,3,4]
+        self.workload_to_test = 1
+        self.workloads_to_rollout = [2,3,4,5]
         self.workload_selected = None
 
     def set_mode(self, mode):

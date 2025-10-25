@@ -6,6 +6,7 @@ import os
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import CheckpointCallback
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
+import torch
 
 # sim config
 NUM_NODES = 1024
@@ -149,7 +150,7 @@ if __name__ == '__main__':
     
 
     # --- PARAMETRI CICLICI ---
-    TRAIN_STEPS = 16_000
+    TRAIN_STEPS = 8_000
     TEST_STEPS = 4_000
 
     # --- MAIN LOOP ---
@@ -179,6 +180,10 @@ if __name__ == '__main__':
                 model = PPO.load(MODEL_PATH, env=env, device="cpu", tensorboard_log="./logs/")
             else:
                 print("[Main] New Model creation")
+                policy_kwargs = dict(
+                    net_arch=dict(pi=[64, 64], vf=[64, 64]),
+                    activation_fn=torch.nn.Tanh
+                )
                 model = PPO(
                     "MlpPolicy",
                     env,
@@ -186,7 +191,8 @@ if __name__ == '__main__':
                     device="cpu",
                     tensorboard_log="./logs/",
                     n_steps=8000,
-                    batch_size=32
+                    batch_size=32,
+                    policy_kwargs=policy_kwargs
                 )
 
             
