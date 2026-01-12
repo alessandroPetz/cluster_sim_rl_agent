@@ -190,6 +190,12 @@ class SimInterface:
                 # move summary in history folder
                 dest_path = os.path.join(history_dir, filename)
                 shutil.move(file_path, dest_path)
+
+                # save the file with number of active node and energy history
+                file_path2 = os.path.join(current_dir, filename.replace("summary", ""))
+                dest_path2 = os.path.join(history_dir, filename.replace("summary", ""))
+                shutil.move(file_path2, dest_path2)
+
                 print(f"Moved: {filename} → {history_dir}")
         
         
@@ -250,7 +256,7 @@ class SimInterface:
                 "batsim",
                 "-p", f"{workspace}/input_files/experiment1/cluster_energy_1024.xml",
                 "--mmax-workload",
-                "-w", f"{workspace}/input_files/experiment1/1024_nodes.json",
+                "-w", f"{workspace}/input_files/experiment2/1024_nodes_v5.json",
                 "-E"
             ],
             stdout=open(f"{workspace}/tmp/batsim.log", "w"),
@@ -271,7 +277,7 @@ class SimInterface:
             [
                 f"{workspace}/source/ear_private/src/tools/cluster_sim",
                 "test_tag",
-                "../input_files/experiment1/cpu_1k_powerusage.txt" 
+                "../input_files/experiment2/cpu_1k_powerusage_v5.txt" 
                 
             ],
             env=env_cluster_sim,
