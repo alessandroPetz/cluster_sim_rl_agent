@@ -6,6 +6,7 @@ import os
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import CheckpointCallback
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
+import torch
 
 
 # sim config
@@ -175,15 +176,30 @@ if __name__ == '__main__':
                 model = PPO.load(MODEL_PATH, env=env, device="cpu", tensorboard_log="./logs/")
             else:
                 print("[Main] New Model creation")
+                policy_kwargs = dict(
+                    net_arch=dict(pi=[64, 64], vf=[64, 64]),
+                    activation_fn=torch.nn.Tanh
+                )
                 model = PPO(
-                    "MlpPolicy", 
-                    env, verbose=1, 
-                    device="cpu", 
+                    "MlpPolicy",
+                    env,
+                    verbose=1,
+                    device="cpu",
                     tensorboard_log="./logs/",
-                    n_steps= 8000,                # every 2 simulation. default 2048
-                    batch_size=32                 # def 64
-                    #learning_rate = 3e-5         # def 3e-4
-                    )
+                    n_steps=8000,
+                    batch_size=32,
+                    policy_kwargs=policy_kwargs
+                )
+                # print("[Main] New Model creation")
+                # model = PPO(
+                #     "MlpPolicy", 
+                #     env, verbose=1, 
+                #     device="cpu", 
+                #     tensorboard_log="./logs/",
+                #     n_steps= 8000,                # every 2 simulation. default 2048
+                #     batch_size=32                 # def 64
+                #     #learning_rate = 3e-5         # def 3e-4
+                #     )
 
             # Callback to save the checkpoint
             checkpoint_callback = CheckpointCallback(
