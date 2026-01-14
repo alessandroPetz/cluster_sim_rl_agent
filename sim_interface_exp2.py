@@ -202,6 +202,12 @@ class SimInterface:
                 # move summary in history folder
                 dest_path = os.path.join(history_dir, filename)
                 shutil.move(file_path, dest_path)
+
+                # save the file with number of active node and energy history
+                file_path2 = os.path.join(current_dir, filename.replace("summary", ""))
+                dest_path2 = os.path.join(history_dir, filename.replace("summary", ""))
+                shutil.move(file_path2, dest_path2)
+                
                 print(f"[SimInterface]Moved: {filename} → {history_dir}")
         
         
