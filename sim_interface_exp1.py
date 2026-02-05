@@ -39,10 +39,11 @@ class PowercapStatus:
 
 class SimInterface:
     def __init__(self,
-                 num_nodes=1024,
-                 max_watt_per_node=850,
-                 cluster_max_power=800_000,
-                 min_node_power=750,
+                 num_jobs,
+                 num_nodes,
+                 max_watt_per_node,
+                 cluster_max_power,
+                 min_node_power,
                  host='localhost', 
                  port=12345
                  ):
@@ -52,6 +53,7 @@ class SimInterface:
           per compatibilità, ma non vengono usati direttamente dal Python.
         """
         
+        self.num_jobs=num_jobs
         self.num_nodes = num_nodes
         self.max_watt_per_node = max_watt_per_node
         self.cluster_max_power = cluster_max_power
@@ -237,8 +239,8 @@ class SimInterface:
         env_eargmd["EAR_ETC"] = f"{workspace}/EAR/etc"
 
         env_cluster_sim = os.environ.copy()
-        env_cluster_sim["CLUSTER_SIM_NUM_NODES"] = "1024"
-        env_cluster_sim["CLUSTER_SIM_DEF_POWERCAP"] = "750"
+        env_cluster_sim["CLUSTER_SIM_NUM_NODES"] = str(self.num_nodes)
+        env_cluster_sim["CLUSTER_SIM_DEF_POWERCAP"] = str(self.min_node_power)
 
         #print("[SimInterface] >>> Start eargmd...")
         self.eargmd_proc = subprocess.Popen(
@@ -254,9 +256,9 @@ class SimInterface:
         self.batsim_proc = subprocess.Popen(
             [
                 "batsim",
-                "-p", f"{workspace}/input_files/experiment1/cluster_energy_1024.xml",
+                "-p", f"{workspace}/input_files/experiment1_review/cluster_{self.num_nodes}nodes.xml",
                 "--mmax-workload",
-                "-w", f"{workspace}/input_files/experiment2/1024_nodes_v5.json",
+                "-w", f"{workspace}/input_files/experiment1_review/workload_{self.num_jobs}jobs_{self.num_nodes}nodes.json",
                 "-E"
             ],
             stdout=open(f"{workspace}/tmp/batsim.log", "w"),
@@ -277,7 +279,7 @@ class SimInterface:
             [
                 f"{workspace}/source/ear_private/src/tools/cluster_sim",
                 "test_tag",
-                "../input_files/experiment2/cpu_1k_powerusage_v5.txt" 
+                f"../input_files/experiment1_review/power_{self.num_jobs}jobs.txt" 
                 
             ],
             env=env_cluster_sim,
@@ -477,7 +479,7 @@ class SimInterface:
         """
         First thing to do when a training starts and when a simulation is terminated and  new one starts
         """
-
+        
         while True:
             print("[SimInterface] RESET: start with a new simulation..")
             try:

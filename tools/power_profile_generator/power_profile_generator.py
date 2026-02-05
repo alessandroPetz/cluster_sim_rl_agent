@@ -4,9 +4,9 @@ import os
 # Parametri iniziali
 MIN_VAL = 740
 MAX_VAL = 850
-N = 2000
+N = 4000
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-OUTPUT_FILE = os.path.join(SCRIPT_DIR, "./cpu_1k_powerusage_v5.txt")
+OUTPUT_FILE = os.path.join(SCRIPT_DIR, "./power_4000jobs.txt")
 
 with open(OUTPUT_FILE, "w") as f:
     for i in range(N + 1):  # da 0 a N

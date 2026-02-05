@@ -5,6 +5,19 @@ import time
 import signal
 from pathlib import Path
 
+#################################
+# PARAMETRI ESPERIMENTO DA SETTARE
+num_nodes=512
+num_jobs=2000
+def_power_cap=750
+#################################
+
+
+file_cluster_arch = f"cluster_{num_nodes}nodes.xml"
+file_power_profile = f"power_{num_jobs}jobs.txt"
+file_workload = f"workload_{num_jobs}jobs_{num_nodes}nodes.json"
+
+
 def kill_processes_by_name(name: str):
     try:
         # Trova i PID con pgrep
@@ -45,8 +58,8 @@ commands = [
 
     # Terminal 2
     (
-        "batsim -p input_files/experiment1/cluster_energy_1024.xml --mmax-workload "
-        "-w input_files/experiment1/1024_nodes.json -E",
+        f"batsim -p /home/apetrella/Workspace/Barcelona/input_files/experiment1_review/{file_cluster_arch} --mmax-workload "
+        f"-w /home/apetrella/Workspace/Barcelona/input_files/experiment1_review/{file_workload} -E",
         os.path.join(SCRIPT_DIR, "batsim.log"),
     ),
 
@@ -58,10 +71,10 @@ commands = [
 
     # Terminal 4
     (
-        "export CLUSTER_SIM_NUM_NODES=1024 && "
-        "export CLUSTER_SIM_DEF_POWERCAP=750 && "
-        "source/ear_private/src/tools/cluster_sim "
-        "test_tag input_files/experiment1/cpu_1k_powerusage.txt",
+        f"export CLUSTER_SIM_NUM_NODES={num_nodes} && "
+        f"export CLUSTER_SIM_DEF_POWERCAP={def_power_cap} && "
+        "source/ear_private/src/tools/cluster_sim " 
+        f"test_tag input_files/experiment1_review/{file_power_profile}",
         os.path.join(SCRIPT_DIR, "cluster_sim.log"),
     ),
 ]

@@ -10,11 +10,17 @@ import torch
 
 
 # sim config
-NUM_NODES = 1024
+
+#  CONFIGUARE LA SIMULAZIONE QUI E EAR.CONF (TIPO POWERCAP E POWER SETTIMNG)
+
+
+NUM_JOBS = 2000
+NUM_NODES = 512
 DEFAULT_POWER_NODE = 750
 MAX_POWER_NODE = 850
 MAX_POWER_CLUSTER = NUM_NODES * MAX_POWER_NODE
-POWER_CAP_CLUSTER = 765000  # 90%
+POWERCAP_PERCENTAGE = 0.9
+POWER_CAP_CLUSTER =  MAX_POWER_CLUSTER * POWERCAP_PERCENTAGE # 90%
 MAX_STRESS = 100 # ?
 
 # RL config
@@ -101,8 +107,8 @@ class PowercapEnv(gym.Env):
             status.num_greedy
         ], dtype=np.float32)
         # greedy_nodes and data
-        gn = np.zeros(1024, dtype=np.float32)
-        gb = np.zeros((1024, 3), dtype=np.float32)
+        gn = np.zeros(NUM_NODES, dtype=np.float32)
+        gb = np.zeros((NUM_NODES, 3), dtype=np.float32)
         for i, nid in enumerate(status.greedy_nodes[:status.num_greedy]):
             gn[i] = nid
             d = status.greedy_data[i]
@@ -148,6 +154,7 @@ if __name__ == '__main__':
     os.makedirs(MODEL_DIR, exist_ok=True)
     
     sim = SimInterface(
+                num_jobs=NUM_JOBS,
                 num_nodes=NUM_NODES,
                 max_watt_per_node=MAX_POWER_NODE,
                 cluster_max_power=MAX_POWER_CLUSTER,
