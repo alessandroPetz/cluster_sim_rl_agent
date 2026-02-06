@@ -41,6 +41,7 @@ class SimInterface:
     def __init__(self,
                  num_jobs,
                  num_nodes,
+                 workload_version,
                  max_watt_per_node,
                  cluster_max_power,
                  min_node_power,
@@ -55,6 +56,7 @@ class SimInterface:
         
         self.num_jobs=num_jobs
         self.num_nodes = num_nodes
+        self.workload_version = workload_version
         self.max_watt_per_node = max_watt_per_node
         self.cluster_max_power = cluster_max_power
         self.min_node_power = min_node_power
@@ -258,7 +260,7 @@ class SimInterface:
                 "batsim",
                 "-p", f"{workspace}/input_files/experiment1_review/cluster_{self.num_nodes}nodes.xml",
                 "--mmax-workload",
-                "-w", f"{workspace}/input_files/experiment1_review/workload_{self.num_jobs}jobs_{self.num_nodes}nodes.json",
+                "-w", f"{workspace}/input_files/experiment1_review/workload_{self.num_jobs}jobs_{self.num_nodes}nodes_{self.workload_version}.json",
                 "-E"
             ],
             stdout=open(f"{workspace}/tmp/batsim.log", "w"),
@@ -480,8 +482,12 @@ class SimInterface:
         First thing to do when a training starts and when a simulation is terminated and  new one starts
         """
         
+        
+
+
         while True:
             print("[SimInterface] RESET: start with a new simulation..")
+
             try:
                 
                 self.kill_all_processes()                   # kill old processes ["batsim", "batsched", "eargmd", "cluster_sim"]

@@ -7,15 +7,16 @@ from pathlib import Path
 
 #################################
 # PARAMETRI ESPERIMENTO DA SETTARE
-num_nodes=512
+num_nodes=1024
+perc_cluster=95
 num_jobs=2000
-def_power_cap=750
+def_power_cap=680
 #################################
 
 
 file_cluster_arch = f"cluster_{num_nodes}nodes.xml"
 file_power_profile = f"power_{num_jobs}jobs.txt"
-file_workload = f"workload_{num_jobs}jobs_{num_nodes}nodes.json"
+file_workload = f"workload_{num_jobs}jobs_{num_nodes}nodes_{perc_cluster}.json"
 
 
 def kill_processes_by_name(name: str):

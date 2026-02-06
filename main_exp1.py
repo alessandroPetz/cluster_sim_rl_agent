@@ -15,11 +15,14 @@ import torch
 
 
 NUM_JOBS = 2000
-NUM_NODES = 512
-DEFAULT_POWER_NODE = 750
+NUM_NODES = 1024
+WORKLOAD_VERSION = 60
+POWERCAP_PERCENTAGE = 0.8
 MAX_POWER_NODE = 850
+DEFAULT_POWER_NODE = MAX_POWER_NODE * POWERCAP_PERCENTAGE   # 850 * 0.8 = 680; 850 * 0.9 = 765
+
 MAX_POWER_CLUSTER = NUM_NODES * MAX_POWER_NODE
-POWERCAP_PERCENTAGE = 0.9
+
 POWER_CAP_CLUSTER =  MAX_POWER_CLUSTER * POWERCAP_PERCENTAGE # 90%
 MAX_STRESS = 100 # ?
 
@@ -156,6 +159,7 @@ if __name__ == '__main__':
     sim = SimInterface(
                 num_jobs=NUM_JOBS,
                 num_nodes=NUM_NODES,
+                workload_version=WORKLOAD_VERSION,
                 max_watt_per_node=MAX_POWER_NODE,
                 cluster_max_power=MAX_POWER_CLUSTER,
                 min_node_power=DEFAULT_POWER_NODE
