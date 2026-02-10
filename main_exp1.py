@@ -16,8 +16,8 @@ import torch
 
 NUM_JOBS = 2000
 NUM_NODES = 1024
-WORKLOAD_VERSION = 60
-POWERCAP_PERCENTAGE = 0.8
+WORKLOAD_VERSION = 95
+POWERCAP_PERCENTAGE = 0.9
 MAX_POWER_NODE = 850
 DEFAULT_POWER_NODE = MAX_POWER_NODE * POWERCAP_PERCENTAGE   # 850 * 0.8 = 680; 850 * 0.9 = 765
 
@@ -191,6 +191,7 @@ if __name__ == '__main__':
                     net_arch=dict(pi=[64, 64], vf=[64, 64]),
                     activation_fn=torch.nn.Tanh
                 )
+                # OK per 6080 e 6090
                 model = PPO(
                     "MlpPolicy",
                     env,
@@ -209,7 +210,7 @@ if __name__ == '__main__':
                 #     tensorboard_log="./logs/",
                 #     n_steps= 8000,                # every 2 simulation. default 2048
                 #     batch_size=32                 # def 64
-                #     #learning_rate = 3e-5         # def 3e-4
+                #     learning_rate = 3e-5         # def 3e-4
                 #     )
 
             # Callback to save the checkpoint

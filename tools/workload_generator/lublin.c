@@ -245,7 +245,7 @@
 #define POW2_PROB_ACTIVE  0.85
 #define ULOW_ACTIVE       8.0  /* smallest interactive parallel job has 2 nodes */
 #define UMED_ACTIVE       9
-#define UHI_ACTIVE        11  /* biggest interactive job has 45 nodes */
+#define UHI_ACTIVE        11 /* biggest interactive job has 45 nodes */
 #define UPROB_ACTIVE      0.85
 
 /* The parameters for the running time

@@ -10,6 +10,8 @@ import socket
 import psutil
 from datetime import datetime
 from pathlib import Path
+import re
+import random
 
 # Riprendo le stesse classi dati che avevi nel tuo esempio:
 class GreedyBytes:
@@ -39,12 +41,10 @@ class PowercapStatus:
 
 class SimInterface:
     def __init__(self,
-                 num_jobs,
-                 num_nodes,
-                 workload_version,
-                 max_watt_per_node,
-                 cluster_max_power,
-                 min_node_power,
+                 num_jobs=2000,
+                 num_nodes=1024,
+                 max_watt_per_node=850,
+                 cluster_max_power=870_400,
                  host='localhost', 
                  port=12345
                  ):
@@ -56,10 +56,8 @@ class SimInterface:
         
         self.num_jobs=num_jobs
         self.num_nodes = num_nodes
-        self.workload_version = workload_version
         self.max_watt_per_node = max_watt_per_node
         self.cluster_max_power = cluster_max_power
-        self.min_node_power = min_node_power
         self.host = host
         self.port = port
 
@@ -67,6 +65,14 @@ class SimInterface:
         self.status = None
         self.row_summary_file_status = 0
 
+        self.mode = "train"
+        self.workload_to_test = 3
+        self.workloads_to_rollout = [1,2,4,5,6]
+        self.workload_selected = None
+
+    def set_mode(self, mode):
+        self.mode = mode
+        print(f"[SimInterface] Mode set to {mode}")
 
     def kill_all_processes(self):
         print("[SimInterface] Killing old simulation processes: batsim, batsched, eargmd, cluster_sim")
@@ -97,7 +103,7 @@ class SimInterface:
             try:
                 for name in ["eargmd","batsim","batsched","cluster_sim"]:
                     if name in proc.info['name'] or any(name in arg for arg in proc.info.get('cmdline', [])):
-                        print(f"[SimInterface] Killing {name} (pid={proc.pid})")
+                        # print(f"[SimInterface] Killing {name} (pid={proc.pid})")
                         proc.terminate()
                         try:
                             proc.wait(timeout=3)
@@ -147,10 +153,13 @@ class SimInterface:
             
             # save the results
 
-            header = ['timestamp', 'filename', 'energy', 'end_time']       # headers
-            nuova_riga = [timestamp, file_path, energy_sum, last_end_time]
+            header = ['timestamp', 'filename', 'energy', 'end_time','Workload_to_rollout','workload_to_test']       # headers
+            nuova_riga = [timestamp, file_path, energy_sum, last_end_time, self.workload_selected, self.workload_to_test]
 
-            output_path = "history_summaries/results.csv"
+            if self.mode == "test":
+                output_path = "history_summaries/results_test.csv"
+            else:
+                output_path = "history_summaries/results_train.csv"
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
             # Controlla se il file esiste già
@@ -199,8 +208,8 @@ class SimInterface:
                 file_path2 = os.path.join(current_dir, filename.replace("summary", ""))
                 dest_path2 = os.path.join(history_dir, filename.replace("summary", ""))
                 shutil.move(file_path2, dest_path2)
-
-                print(f"Moved: {filename} → {history_dir}")
+                
+                print(f"[SimInterface]Moved: {filename} → {history_dir}")
         
         
         # Remove other files
@@ -221,7 +230,60 @@ class SimInterface:
             pass
             #print("no .trace tu remove")
 
+    def change_etc_file(self,power_value):
+        file_path = Path("/home/apetrella/Workspace/Barcelona/EAR/etc/ear/ear.conf")
+
+        lines = file_path.read_text().splitlines()
+
+        for i, line in enumerate(lines):
+            if line.strip() == "#config_for_experiment3":
+                # Modifico la riga successiva
+                next_line = lines[i + 1]
+
+                # sostituisce solo power=numero
+                next_line = re.sub(r'power=\d+', f'power={power_value}', next_line)
+
+                lines[i + 1] = next_line
+                break
+        else:
+            raise ValueError("config_for_experiment3 non trovato")
+
+        file_path.write_text("\n".join(lines) + "\n")
+
+
     def run_simulation(self):
+        
+        # select the right workload
+        if self.mode == "train":
+            self.workload_selected = random.choice(self.workloads_to_rollout)
+        else:
+            self.workload_selected = self.workload_to_test
+
+        if self.workload_selected == 1:
+            workload_version = 60
+            default_powercap = 80  
+        elif self.workload_selected == 2:
+            workload_version = 60
+            default_powercap = 90
+        elif self.workload_selected == 3:
+            workload_version = 95
+            default_powercap = 80
+        elif self.workload_selected == 4:
+            workload_version = 95
+            default_powercap = 90
+        elif self.workload_selected == 5:
+            workload_version = 120
+            default_powercap = 80
+        elif self.workload_selected == 6:
+            workload_version = 120
+            default_powercap = 90
+        
+        total_cluster_power = default_powercap/100 * self.cluster_max_power     # da inserire nel file etc.conf
+        node_default_powercap = default_powercap/100 * self.max_watt_per_node   # static cap per nodo
+
+        # modifico etc file
+        self.change_etc_file(int(total_cluster_power))
+        
         
         # To start with the simulation, I have to run 4 external processes
 
@@ -242,7 +304,7 @@ class SimInterface:
 
         env_cluster_sim = os.environ.copy()
         env_cluster_sim["CLUSTER_SIM_NUM_NODES"] = str(self.num_nodes)
-        env_cluster_sim["CLUSTER_SIM_DEF_POWERCAP"] = str(self.min_node_power)
+        env_cluster_sim["CLUSTER_SIM_DEF_POWERCAP"] = str(node_default_powercap)
 
         #print("[SimInterface] >>> Start eargmd...")
         self.eargmd_proc = subprocess.Popen(
@@ -260,7 +322,7 @@ class SimInterface:
                 "batsim",
                 "-p", f"{workspace}/input_files/experiment1/cluster_{self.num_nodes}nodes.xml",
                 "--mmax-workload",
-                "-w", f"{workspace}/input_files/experiment1/workload_{self.num_jobs}jobs_{self.num_nodes}nodes_{self.workload_version}.json",
+                "-w", f"{workspace}/input_files/experiment1/workload_{self.num_jobs}jobs_{self.num_nodes}nodes_{workload_version}.json",
                 "-E"
             ],
             stdout=open(f"{workspace}/tmp/batsim.log", "w"),
@@ -475,21 +537,17 @@ class SimInterface:
             self.cpp_file_out.flush()
             # print("[Python] data sent to C:")
         except BrokenPipeError:
-            raise RuntimeError("[SIm Interface] Error writing on socket TCP")
+            raise RuntimeError("[SimInterface] Error writing on socket TCP")
 
     def reset(self):
         """
         First thing to do when a training starts and when a simulation is terminated and  new one starts
         """
-        
-        
 
 
         while True:
             print("[SimInterface] RESET: start with a new simulation..")
-
             try:
-                
                 self.kill_all_processes()                   # kill old processes ["batsim", "batsched", "eargmd", "cluster_sim"]
                 self.remove_metric_files_and_save_summary() # remove all the files generated by simulation processess, and save summary file in history
                 self.run_simulation()                       # run simulation processes

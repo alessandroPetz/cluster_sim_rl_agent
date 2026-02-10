@@ -7,10 +7,10 @@ from pathlib import Path
 
 #################################
 # PARAMETRI ESPERIMENTO DA SETTARE
-num_nodes=1024
-perc_cluster=95
+num_nodes=1024   
+perc_cluster=120  # carico workload indicativo
 num_jobs=2000
-def_power_cap=680
+def_power_cap=765
 #################################
 
 
@@ -59,8 +59,8 @@ commands = [
 
     # Terminal 2
     (
-        f"batsim -p /home/apetrella/Workspace/Barcelona/input_files/experiment1_review/{file_cluster_arch} --mmax-workload "
-        f"-w /home/apetrella/Workspace/Barcelona/input_files/experiment1_review/{file_workload} -E",
+        f"batsim -p /home/apetrella/Workspace/Barcelona/input_files/experiment1/{file_cluster_arch} --mmax-workload "
+        f"-w /home/apetrella/Workspace/Barcelona/input_files/experiment1/{file_workload} -E",
         os.path.join(SCRIPT_DIR, "batsim.log"),
     ),
 
@@ -75,7 +75,7 @@ commands = [
         f"export CLUSTER_SIM_NUM_NODES={num_nodes} && "
         f"export CLUSTER_SIM_DEF_POWERCAP={def_power_cap} && "
         "source/ear_private/src/tools/cluster_sim " 
-        f"test_tag input_files/experiment1_review/{file_power_profile}",
+        f"test_tag input_files/experiment1/{file_power_profile}",
         os.path.join(SCRIPT_DIR, "cluster_sim.log"),
     ),
 ]
