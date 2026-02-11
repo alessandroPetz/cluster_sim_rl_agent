@@ -258,9 +258,9 @@ class SimInterface:
         self.batsim_proc = subprocess.Popen(
             [
                 "batsim",
-                "-p", f"{workspace}/input_files/experiment1/cluster_{self.num_nodes}nodes.xml",
+                "-p", f"{workspace}/input_files/cluster_{self.num_nodes}nodes.xml",
                 "--mmax-workload",
-                "-w", f"{workspace}/input_files/experiment1/workload_{self.num_jobs}jobs_{self.num_nodes}nodes_{self.workload_version}.json",
+                "-w", f"{workspace}/input_files/workload_{self.num_jobs}jobs_{self.num_nodes}nodes_{self.workload_version}.json",
                 "-E"
             ],
             stdout=open(f"{workspace}/tmp/batsim.log", "w"),
@@ -281,7 +281,7 @@ class SimInterface:
             [
                 f"{workspace}/source/ear_private/src/tools/cluster_sim",
                 "test_tag",
-                f"../input_files/experiment1/power_{self.num_jobs}jobs.txt" 
+                f"../input_files/power_{self.num_jobs}jobs.txt" 
                 
             ],
             env=env_cluster_sim,

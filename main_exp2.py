@@ -1,10 +1,8 @@
 #
-# In this second experiment we train the model with 4 different workloads, then we test a model 
-# with a 5th workload. 
-# IMPORTANT: the 5 workload have the same characteristics: num job, statistical node distribution per node, and same total powercap. 
+# In this third experiment, as in the first one, we have a set of 3 workloads with different characteristics (nodes per job distribution).
+# every workload is assiocated to a powercap of 80 or 90% of nominal cluster power. 6 cases in total 
 #
-
-
+# We train the model with 5 of 6 cases and we test the model with the other one.
 
 
 import gymnasium as gym
@@ -18,11 +16,10 @@ from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 import torch
 
 # sim config
+NUM_JOBS = 2000
 NUM_NODES = 1024
-DEFAULT_POWER_NODE = 750
 MAX_POWER_NODE = 850
 MAX_POWER_CLUSTER = NUM_NODES * MAX_POWER_NODE
-POWER_CAP_CLUSTER = 765000  # 90%
 MAX_STRESS = 100 # ?
 
 # RL config
@@ -41,8 +38,6 @@ class PowercapEnv(gym.Env):
 
     def __init__(self, simulator):
 
-        LIMIT_POWER = max(MAX_POWER_CLUSTER, POWER_CAP_CLUSTER)   # considered that powercap > total power ??
-
         super(PowercapEnv, self).__init__()
         self.simulator = simulator  # external process interface
 
@@ -56,11 +51,11 @@ class PowercapEnv(gym.Env):
             np.array([
                     NUM_NODES,              # num of total_nodes
                     NUM_NODES,              # num of idle_nodes
-                    LIMIT_POWER,             # accumulated released power in last T1 
-                    LIMIT_POWER,             # accumulated new_req 
-                    LIMIT_POWER,              # Total power allocated to idle nodes
-                    LIMIT_POWER,                 # Accumulated power       
-                    LIMIT_POWER,                 # Accumulated current powercap limits
+                    MAX_POWER_CLUSTER,             # accumulated released power in last T1 
+                    MAX_POWER_CLUSTER,             # accumulated new_req 
+                    MAX_POWER_CLUSTER,              # Total power allocated to idle nodes
+                    MAX_POWER_CLUSTER,                 # Accumulated power       
+                    MAX_POWER_CLUSTER,                 # Accumulated current powercap limits
                     NUM_NODES               # num of greedy nodes
                     ], dtype=np.float32),
             np.ones(NUM_NODES) * (NUM_NODES-1),                                  # array([1023., 1023., 1023., ..., 1023.]) lungo 1024
@@ -167,10 +162,11 @@ if __name__ == '__main__':
         try:
             # TRAIN 
             sim = SimInterface(
+                num_jobs=NUM_JOBS,
                 num_nodes=NUM_NODES,
                 max_watt_per_node=MAX_POWER_NODE,
-                cluster_max_power=MAX_POWER_CLUSTER,
-                min_node_power=DEFAULT_POWER_NODE
+                cluster_max_power=MAX_POWER_CLUSTER#,
+                #min_node_power=DEFAULT_POWER_NODE
             )
 
             env = DummyVecEnv([lambda: PowercapEnv(sim)])
@@ -222,10 +218,11 @@ if __name__ == '__main__':
             
             # Ricrea un ambiente NUOVO per test
             sim_test = SimInterface(
+                num_jobs=NUM_JOBS,
                 num_nodes=NUM_NODES,
                 max_watt_per_node=MAX_POWER_NODE,
-                cluster_max_power=MAX_POWER_CLUSTER,
-                min_node_power=DEFAULT_POWER_NODE
+                cluster_max_power=MAX_POWER_CLUSTER#,
+                #min_node_power=DEFAULT_POWER_NODE
             )
             test_env = DummyVecEnv([lambda: PowercapEnv(sim_test)])
 

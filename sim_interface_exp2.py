@@ -10,6 +10,7 @@ import socket
 import psutil
 from datetime import datetime
 from pathlib import Path
+import re
 import random
 
 # Riprendo le stesse classi dati che avevi nel tuo esempio:
@@ -40,10 +41,10 @@ class PowercapStatus:
 
 class SimInterface:
     def __init__(self,
+                 num_jobs=2000,
                  num_nodes=1024,
                  max_watt_per_node=850,
-                 cluster_max_power=800_000,
-                 min_node_power=750,
+                 cluster_max_power=870_400,
                  host='localhost', 
                  port=12345
                  ):
@@ -53,10 +54,10 @@ class SimInterface:
           per compatibilità, ma non vengono usati direttamente dal Python.
         """
         
+        self.num_jobs=num_jobs
         self.num_nodes = num_nodes
         self.max_watt_per_node = max_watt_per_node
         self.cluster_max_power = cluster_max_power
-        self.min_node_power = min_node_power
         self.host = host
         self.port = port
 
@@ -65,8 +66,8 @@ class SimInterface:
         self.row_summary_file_status = 0
 
         self.mode = "train"
-        self.workload_to_test = 1
-        self.workloads_to_rollout = [0,2,3,4,5]
+        self.workload_to_test = 5
+        self.workloads_to_rollout = [1,2,3,4,6]
         self.workload_selected = None
 
     def set_mode(self, mode):
@@ -229,6 +230,27 @@ class SimInterface:
             pass
             #print("no .trace tu remove")
 
+    def change_etc_file(self,power_value):
+        file_path = Path("/home/apetrella/Workspace/Barcelona/EAR/etc/ear/ear.conf")
+
+        lines = file_path.read_text().splitlines()
+
+        for i, line in enumerate(lines):
+            if line.strip() == "#SET HERE YOUR POWER TOTAL CAP":
+                # Modifico la riga successiva
+                next_line = lines[i + 1]
+
+                # sostituisce solo power=numero
+                next_line = re.sub(r'power=\d+', f'power={power_value}', next_line)
+
+                lines[i + 1] = next_line
+                break
+        else:
+            raise ValueError("config_for_experiment3 non trovato")
+
+        file_path.write_text("\n".join(lines) + "\n")
+
+
     def run_simulation(self):
         
         # select the right workload
@@ -236,11 +258,36 @@ class SimInterface:
             self.workload_selected = random.choice(self.workloads_to_rollout)
         else:
             self.workload_selected = self.workload_to_test
+
+        if self.workload_selected == 1:
+            workload_version = 60
+            default_powercap = 80  
+        elif self.workload_selected == 2:
+            workload_version = 60
+            default_powercap = 90
+        elif self.workload_selected == 3:
+            workload_version = 95
+            default_powercap = 80
+        elif self.workload_selected == 4:
+            workload_version = 95
+            default_powercap = 90
+        elif self.workload_selected == 5:
+            workload_version = 120
+            default_powercap = 80
+        elif self.workload_selected == 6:
+            workload_version = 120
+            default_powercap = 90
+        
+        total_cluster_power = default_powercap/100 * self.cluster_max_power     # da inserire nel file etc.conf
+        node_default_powercap = default_powercap/100 * self.max_watt_per_node   # static cap per nodo
+
+        # modifico etc file
+        self.change_etc_file(int(total_cluster_power))
         
         
         # To start with the simulation, I have to run 4 external processes
 
-        print("[SimInterface] Start with the simulation processes (eargmd, batsim, batsche, cluster_sim)")
+        print("[SimInterface] >>> Start with the simulation processes (eargmd, batsim, batsche, cluster_sim")
 
         # processes setting
         # Workspace is the folder that cotain the folder that contain the python script
@@ -256,8 +303,8 @@ class SimInterface:
         env_eargmd["EAR_ETC"] = f"{workspace}/EAR/etc"
 
         env_cluster_sim = os.environ.copy()
-        env_cluster_sim["CLUSTER_SIM_NUM_NODES"] = "1024"
-        env_cluster_sim["CLUSTER_SIM_DEF_POWERCAP"] = "750"
+        env_cluster_sim["CLUSTER_SIM_NUM_NODES"] = str(self.num_nodes)
+        env_cluster_sim["CLUSTER_SIM_DEF_POWERCAP"] = str(node_default_powercap)
 
         #print("[SimInterface] >>> Start eargmd...")
         self.eargmd_proc = subprocess.Popen(
@@ -269,13 +316,13 @@ class SimInterface:
 
         time.sleep(1)
 
-        print(f"[SimInterface] Workload 1024_nodes_v{self.workload_selected}.json is selected")
+        #print("[SimInterface] >>> Start batsim...")
         self.batsim_proc = subprocess.Popen(
             [
                 "batsim",
-                "-p", f"{workspace}/input_files/experiment1/cluster_energy_1024.xml",
+                "-p", f"{workspace}/input_files/cluster_{self.num_nodes}nodes.xml",
                 "--mmax-workload",
-                "-w", f"{workspace}/input_files/experiment2/1024_nodes_v{self.workload_selected}.json",
+                "-w", f"{workspace}/input_files/workload_{self.num_jobs}jobs_{self.num_nodes}nodes_{workload_version}.json",
                 "-E"
             ],
             stdout=open(f"{workspace}/tmp/batsim.log", "w"),
@@ -296,7 +343,7 @@ class SimInterface:
             [
                 f"{workspace}/source/ear_private/src/tools/cluster_sim",
                 "test_tag",
-                f"../input_files/experiment2/cpu_1k_powerusage_v{self.workload_selected}.txt" 
+                f"../input_files/power_{self.num_jobs}jobs.txt" 
                 
             ],
             env=env_cluster_sim,
@@ -305,7 +352,7 @@ class SimInterface:
             cwd = script_path.parent
         )
 
-        # print("[SImInterface] >>> All the processes are running.")
+        print("[SImInterface] >>> All the processes are running.")
 
     def connect_at_simulation_socket(self, host='localhost', port=12345, timeout=4, delay=0.5):
         """
