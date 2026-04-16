@@ -66,8 +66,8 @@ class SimInterface:
         self.row_summary_file_status = 0
 
         self.mode = "train"
-        self.workload_to_test = 5
-        self.workloads_to_rollout = [1,2,3,4,6]
+        self.workload_to_test = 1
+        self.workloads_to_rollout = [2,3,4,5,6]
         self.workload_selected = None
 
     def set_mode(self, mode):
@@ -343,7 +343,7 @@ class SimInterface:
             [
                 f"{workspace}/source/ear_private/src/tools/cluster_sim",
                 "test_tag",
-                f"../input_files/power_{self.num_jobs}jobs.txt" 
+                f"../input_files/power_{self.num_jobs}jobs_mixed.txt" 
                 
             ],
             env=env_cluster_sim,
@@ -429,8 +429,8 @@ class SimInterface:
                         # time = (float(last_row['end_time']) - float(last_row['start_time'])) 
                         # energy = float(last_row['energy']) 
 
-                # reward = 1* energy
-                reward = 1* time
+                # reward = -1* energy
+                reward = -1* time
 
                 # print("time = ", time)
                 # print("energy = ", energy)

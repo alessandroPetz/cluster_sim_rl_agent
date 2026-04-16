@@ -8,14 +8,14 @@ from pathlib import Path
 #################################
 # PARAMETRI ESPERIMENTO DA SETTARE
 num_nodes=1024   
-perc_cluster=120  # carico workload indicativo
+perc_cluster=60  # carico workload indicativo
 num_jobs=2000
-def_power_cap=765
+def_power_cap=680
 #################################
 
 
 file_cluster_arch = f"cluster_{num_nodes}nodes.xml"
-file_power_profile = f"power_{num_jobs}jobs.txt"
+file_power_profile = f"power_{num_jobs}jobs_mixed.txt"
 file_workload = f"workload_{num_jobs}jobs_{num_nodes}nodes_{perc_cluster}.json"
 
 

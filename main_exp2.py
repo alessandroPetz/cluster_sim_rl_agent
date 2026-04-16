@@ -186,7 +186,7 @@ if __name__ == '__main__':
             else:
                 print("[Main] New Model creation")
                 policy_kwargs = dict(
-                    net_arch=dict(pi=[64, 64], vf=[64, 64]),
+                    net_arch=dict(pi=[256, 256], vf=[256, 256]),
                     activation_fn=torch.nn.Tanh
                 )
                 model = PPO(

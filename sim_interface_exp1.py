@@ -367,8 +367,8 @@ class SimInterface:
                         # time = (float(last_row['end_time']) - float(last_row['start_time'])) 
                         # energy = float(last_row['energy']) 
 
-                # reward = 1* energy
-                reward = 1* time
+                # reward = -1* energy
+                reward = -1* time
 
                 # print("time = ", time)
                 # print("energy = ", energy)
