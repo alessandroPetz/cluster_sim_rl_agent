@@ -16,8 +16,8 @@ import torch
 
 NUM_JOBS = 2000
 NUM_NODES = 1024
-WORKLOAD_VERSION = 95
-POWERCAP_PERCENTAGE = 0.9
+WORKLOAD_VERSION = 120
+POWERCAP_PERCENTAGE = 0.8
 MAX_POWER_NODE = 850
 DEFAULT_POWER_NODE = MAX_POWER_NODE * POWERCAP_PERCENTAGE   # 850 * 0.8 = 680; 850 * 0.9 = 765
 
@@ -192,6 +192,8 @@ if __name__ == '__main__':
                     activation_fn=torch.nn.Tanh
                 )
                 # OK per 6080 e 6090
+                SEED = 0
+
                 model = PPO(
                     "MlpPolicy",
                     env,
@@ -200,7 +202,8 @@ if __name__ == '__main__':
                     tensorboard_log="./logs/",
                     n_steps=8000,
                     batch_size=32,
-                    policy_kwargs=policy_kwargs
+                    policy_kwargs=policy_kwargs,
+                    seed=SEED
                 )
                 # print("[Main] New Model creation")
                 # model = PPO(

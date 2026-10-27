@@ -8,14 +8,29 @@ from pathlib import Path
 #################################
 # PARAMETRI ESPERIMENTO DA SETTARE
 num_nodes=1024   
-perc_cluster=60  # carico workload indicativo
+perc_cluster=120  # carico workload indicativo
 num_jobs=2000
 def_power_cap=680
 #################################
 
+# folder_test= ""
+# folder_test= "overhead_test_input/"
+folder_test= "cpu_mem_mix_test_input/"
 
+
+# file_cluster_arch = f"cluster_{num_nodes}nodes.xml"
+# file_power_profile = f"power_{num_jobs}jobs.txt"
+# file_workload = f"workload_{num_jobs}jobs_{num_nodes}nodes_{perc_cluster}.json"
+
+# name folder for sensitivity analysis
+# 1 = 100 0 0
+# 2 = 33 33 33 
+# 3 = 60 20 20 
+# 4 = 20 60 20 
+# 5 = 20 20 60  
+numtest=1
 file_cluster_arch = f"cluster_{num_nodes}nodes.xml"
-file_power_profile = f"power_{num_jobs}jobs_mixed.txt"
+file_power_profile = f"power_{num_jobs}jobs_{numtest}.txt"
 file_workload = f"workload_{num_jobs}jobs_{num_nodes}nodes_{perc_cluster}.json"
 
 
@@ -46,6 +61,8 @@ kill_processes_by_name("cluster_sim")
 SCRIPT_DIR = Path(__file__).resolve().parent
 BASE = SCRIPT_DIR.parent.parent.parent
 
+
+
 # ##############
 # Ho settato cwd = BASE
 ####################
@@ -59,8 +76,8 @@ commands = [
 
     # Terminal 2
     (
-        f"batsim -p /home/apetrella/Workspace/Barcelona/input_files/{file_cluster_arch} --mmax-workload "
-        f"-w /home/apetrella/Workspace/Barcelona/input_files/{file_workload} -E",
+        f"batsim -p /home/apetrella/Workspace/Barcelona/input_files/{folder_test}{file_cluster_arch} --mmax-workload "
+        f"-w /home/apetrella/Workspace/Barcelona/input_files/{folder_test}{file_workload} -E",
         os.path.join(SCRIPT_DIR, "batsim.log"),
     ),
 
@@ -75,7 +92,7 @@ commands = [
         f"export CLUSTER_SIM_NUM_NODES={num_nodes} && "
         f"export CLUSTER_SIM_DEF_POWERCAP={def_power_cap} && "
         "source/ear_private/src/tools/cluster_sim " 
-        f"test_tag input_files/{file_power_profile}",
+        f"test_tag input_files/{folder_test}{file_power_profile}",
         os.path.join(SCRIPT_DIR, "cluster_sim.log"),
     ),
 ]
