@@ -10,6 +10,7 @@ import socket
 import psutil
 from datetime import datetime
 from pathlib import Path
+import math
 
 # Riprendo le stesse classi dati che avevi nel tuo esempio:
 class GreedyBytes:
@@ -35,6 +36,7 @@ class PowercapStatus:
         self.metric_value = metric_value
         self.done = done
         self.truncated = truncated
+        self.last_reward_energy_timestamp = None
 
 
 class SimInterface:
@@ -97,16 +99,39 @@ class SimInterface:
         # print("[SimInterface] Kill external processes")
         for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
             try:
-                for name in ["eargmd","batsim","batsched","cluster_sim"]:
-                    if name in proc.info['name'] or any(name in arg for arg in proc.info.get('cmdline', [])):
-                        print(f"[SimInterface] Killing {name} (pid={proc.pid})")
+                proc_name = proc.info.get('name') or ''
+                cmdline = proc.info.get('cmdline') or []
+
+                for name in ["eargmd", "batsim", "batsched", "cluster_sim"]:
+
+                    if (
+                        name in proc_name
+                        or any(name in str(arg) for arg in cmdline)
+                    ):
+                        print(
+                            f"[SimInterface] Killing {name} "
+                            f"(pid={proc.pid})"
+                        )
+
                         proc.terminate()
+
                         try:
                             proc.wait(timeout=3)
+
                         except psutil.TimeoutExpired:
-                            print(f"[SimInterface] Kill forzato di {name} (pid={proc.pid})")
+                            print(
+                                f"[SimInterface] Kill forzato di "
+                                f"{name} (pid={proc.pid})"
+                            )
                             proc.kill()
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
+
+                        break
+
+            except (
+                psutil.NoSuchProcess,
+                psutil.AccessDenied,
+                psutil.ZombieProcess
+            ):
                 continue
 
     def process_summary_and_save_results(self, file_path):
@@ -343,7 +368,81 @@ class SimInterface:
                 print(f"[SimInterface] Socket not ready, retry in {delay} seconds...")
                 time.sleep(delay)
 
+    def read_reward_from_summary_old(self):
+
+        # Reading the reward from summry file.
+        # We read the last row in summary file and save the end_time and energy data.
+        # 
+        # For now we are using the energy as a reward, and
+        # We apply REWARD SHAPING:
+        # If the simulation is not finished 
+        #       ->  reward = -1 * energy_last_row * 0.001 
+        # else if is finished
+        #       ->  reward = -1 * total_energy 
+
+        files = glob.glob("trace*summary.csv")
+
+        try:
+            if files and os.path.exists(files[0]):
+                
+                with open(files[0], newline='') as csvfile:
+                    reader = list(csv.DictReader(csvfile, delimiter=';'))
+                    
+                    # If the file does not have new line (Job Submitted in the simulation, we have the reward only if job is submitted) 
+                    # or the file have 0 line (The simulation is started now): 
+                    if not reader or self.row_summary_file_status == len(reader):
+                        time = 0
+                        job_id = -1
+                        energy = 0
+                    
+                    # If the file have at least 1 new line.
+                    # in theory just in one case we have more than one new row, when the simulation is finished, beacuse they produce 2 lines:
+                    # one line for the end of the last job, one line for the idle nodes consuption. It is not a problem because 
+                    # we take every time the last row, and if the simulation is finished, we take the sum of energy of the all the job
+                    else:
+                        last_row = reader[-1]
+                        job_id = last_row['job_id']
+                        self.row_summary_file_status = len(reader)
+
+                        # reward = total energy consumed
+                        if (job_id == "IDLE"):
+                            
+                            time = float(last_row['end_time'])
+                            energy = 0
+                            for i in range(len(reader)-1):
+                                row = reader[i]
+                                energy = energy + float(row['energy']) 
+
+                        # reward = energy last job * 0.001
+                        else:
+
+                            time = (float(last_row['end_time']) - float(last_row['start_time'])) *0.001
+                            energy = float(last_row['energy'])  * 0.001
+                        
+                        ##### NO SHAPING #####
+                        # time = (float(last_row['end_time']) - float(last_row['start_time'])) 
+                        # energy = float(last_row['energy']) 
+
+                reward = -1* energy
+                # reward = -1* time
+
+                # print("time = ", time)
+                # print("energy = ", energy)
+                # print("metric = ", metric)
+                # print("Job_ID = ", job_id)
+                
+                return reward, job_id
+            
+            else:
+                print("[Python] file summary don't found. Episode to truncate.")
+                return 0,-1
+        except:
+            print("[Python] file summary don't found. Episodie to truncate.")
+            return 0,-1
+    
     def read_reward_from_summary(self):
+
+        
 
         files = glob.glob("trace*summary.csv")
 
@@ -355,79 +454,141 @@ class SimInterface:
 
                     # No new completed jobs
                     if not reader or self.row_summary_file_status == len(reader):
-                        time = 0
+                        time_metric = 0.0
+                        energy_metric = 0.0
                         job_id = -1
-                        energy = 0
 
                     else:
                         last_row = reader[-1]
                         job_id = last_row['job_id']
                         self.row_summary_file_status = len(reader)
 
-                        # Simulation completed
-                        if job_id == "IDLE":
-                            time = float(last_row['end_time'])
-                            start_time = None
-                            end_time = None
+                        # =====================================
+                        # TIME METRIC
+                        # =====================================
 
-                        # Intermediate step
+                        if job_id == "IDLE":
+                            # Final makespan
+                            current_time = float(last_row['end_time'])
+                            time_metric = current_time
+
                         else:
+                            # Execution time of the last completed job
                             start_time = float(last_row['start_time'])
                             end_time = float(last_row['end_time'])
-                            time = (end_time - start_time) * 0.001
 
-                        # === ENERGY CALCULATION FROM TRACE ===
+                            current_time = end_time
+                            time_metric = end_time - start_time
 
-                        energy = 0.0
+                        # =====================================
+                        # ENERGY METRIC FROM TRACE
+                        # =====================================
+
+                        energy_metric = 0.0
 
                         trace_path = files[0].replace("summary.csv", ".csv")
 
                         if os.path.exists(trace_path):
 
                             with open(trace_path, newline='') as trace_file:
+
                                 trace_reader = csv.DictReader(
-                                    trace_file, delimiter=';'
+                                    trace_file,
+                                    delimiter=';'
                                 )
 
                                 previous_row = next(trace_reader, None)
 
-                                for row in trace_reader:
+                                if previous_row is not None:
 
-                                    t_previous = float(previous_row['timestamp'])
-                                    t_current = float(row['timestamp'])
+                                    # First time the function processes energy:
+                                    # start from the beginning of the trace.
+                                    last_energy_timestamp = getattr(
+                                        self,
+                                        "last_reward_energy_timestamp",
+                                        None
+                                    )
 
-                                    if t_current < t_previous:
-                                        raise ValueError(
-                                            "Invalid trace timestamps"
+                                    if last_energy_timestamp is None:
+                                        last_energy_timestamp = float(
+                                            previous_row['timestamp']
                                         )
 
-                                    # Final step: integrate the entire trace
-                                    if job_id == "IDLE":
-                                        dt = t_current - t_previous
+                                    last_trace_timestamp = float(
+                                        previous_row['timestamp']
+                                    )
 
-                                    # Intermediate step: integrate the
-                                    # interval corresponding to the last job
-                                    else:
+                                    for row in trace_reader:
+
+                                        t_previous = float(
+                                            previous_row['timestamp']
+                                        )
+
+                                        t_current = float(
+                                            row['timestamp']
+                                        )
+
+                                        if t_current < t_previous:
+                                            raise ValueError(
+                                                "Invalid trace timestamps"
+                                            )
+
+                                        # Integrate only the portion of this
+                                        # interval that has not already been
+                                        # included in a previous reward.
+                                        interval_start = max(
+                                            t_previous,
+                                            last_energy_timestamp
+                                        )
+
+                                        interval_end = min(
+                                            t_current,
+                                            current_time
+                                        )
+
                                         dt = max(
                                             0.0,
-                                            min(t_current, end_time)
-                                            - max(t_previous, start_time)
+                                            interval_end - interval_start
                                         )
 
-                                    active_power = float(
-                                        previous_row['active_power']
+                                        if not math.isfinite(dt):
+                                            raise ValueError(
+                                                f"Invalid dt in trace: {dt}"
+                                            )
+
+                                        if dt > 0:
+
+                                            active_power = float(
+                                                previous_row['active_power']
+                                            )
+
+                                            idle_power = float(
+                                                previous_row['idle_power']
+                                            )
+
+                                            if not math.isfinite(active_power):
+                                                raise ValueError(
+                                                    f"Invalid active_power in trace: {active_power}"
+                                                )
+
+                                            if not math.isfinite(idle_power):
+                                                raise ValueError(
+                                                    f"Invalid idle_power in trace: {idle_power}"
+                                                )
+
+                                            energy_metric += (
+                                                active_power + idle_power
+                                            ) * dt
+
+                                        last_trace_timestamp = t_current
+                                        previous_row = row
+
+                                    # Save the point up to which energy has
+                                    # actually been integrated.
+                                    self.last_reward_energy_timestamp = min(
+                                        current_time,
+                                        last_trace_timestamp
                                     )
-                                    idle_power = float(
-                                        previous_row['idle_power']
-                                    )
-
-                                    energy += (active_power + idle_power) * dt
-
-                                    previous_row = row
-
-                            # Keep original reward shaping factor
-                            if job_id != "IDLE":
-                                energy *= 0.001
 
                         else:
                             print(
@@ -436,19 +597,80 @@ class SimInterface:
                             )
 
                         # =====================================
+                        # REWARD
+                        # =====================================
 
-                # Reward unchanged
-                reward = - 1 * time
+                        # Scaling factors
+                        TIME_SCALE = 1e-3
+                        ENERGY_SCALE = 1e-9
 
-                return reward, job_id
+                        # Relative importance of the two objectives
+                        TIME_WEIGHT = 0.5
+                        ENERGY_WEIGHT = 0.5
+
+                        scaled_time = time_metric * TIME_SCALE
+                        scaled_energy = energy_metric * ENERGY_SCALE
+
+                        reward = -(
+                            TIME_WEIGHT * scaled_time
+                            + ENERGY_WEIGHT * scaled_energy
+                        )
+                        
+
+                        # Optional debug
+                        # print(
+                        #     f"time={time_metric:.2f} s, "
+                        #     f"energy={energy_metric:.2f} J, "
+                        #     f"scaled_time={scaled_time:.4f}, "
+                        #     f"scaled_energy={scaled_energy:.4f}, "
+                        #     f"reward={reward:.4f}"
+                        # )
+
+                        if not math.isfinite(time_metric):
+                            raise ValueError(
+                                f"Invalid time metric: {time_metric}"
+                            )
+
+                        if not math.isfinite(energy_metric):
+                            raise ValueError(
+                                f"Invalid energy metric: {energy_metric}"
+                            )
+
+                        if not math.isfinite(reward):
+                            raise ValueError(
+                                f"Invalid reward: {reward}"
+                            )
+                        if not math.isfinite(scaled_energy):
+                            raise RuntimeError(
+                                f"INVALID scaled_energy: {scaled_energy}"
+                            )
+
+                        if not math.isfinite(reward):
+                            raise RuntimeError(
+                                f"INVALID reward: {reward}"
+                            )
+                        if abs(reward) > 1e6:
+                            print(
+                                f"[WARNING] Huge reward: {reward}, "
+                                f"time={time_metric}, energy={energy_metric}"
+                            )
+
+                        return reward, job_id
+
+                # No new job completed
+                return 0.0, job_id
 
             else:
-                print("[Python] file summary don't found. Episode to truncate.")
+                print(
+                    "[Python] file summary don't found. "
+                    "Episode to truncate."
+                )
                 return 0, -1
 
         except Exception as e:
             print(f"[Python] Error reading reward: {e}")
             return 0, -1
+
 
     def read_status_and_reward_from_simulation(self):
         
@@ -557,11 +779,16 @@ class SimInterface:
             try:
                 
                 self.kill_all_processes()                   # kill old processes ["batsim", "batsched", "eargmd", "cluster_sim"]
+                # Give the OS/processes time to release resources and sockets
+                time.sleep(1)
+                
                 self.remove_metric_files_and_save_summary() # remove all the files generated by simulation processess, and save summary file in history
                 self.run_simulation()                       # run simulation processes
                 self.connect_at_simulation_socket()         # connectin to the socket with the simulation
                 self.row_summary_file_status = 0            # reset the number of the row to read in a sunmmary file 
-                self.status = self.read_status_and_reward_from_simulation()  # read the first status of the Cluster in the simulation
+                 
+                # self.last_reward_energy_timestamp = None
+                self.status = self.read_status_and_reward_from_simulation() # read the first status of the Cluster in the simulation
                 return self.status
             except Exception as e:
                 print(f"Some error occurred during the RESET {e}")
@@ -589,7 +816,12 @@ class SimInterface:
         print("[SimInterface] Closing the training")
 
         try:
-            if hasattr(self, 'eargmd_proc') and self.eargmd_proc and not self.eargmd_proc.stdin.closed:
+            if (
+                hasattr(self, 'eargmd_proc')
+                and self.eargmd_proc
+                and self.eargmd_proc.stdin is not None
+                and not self.eargmd_proc.stdin.closed
+            ):
                 self.eargmd_proc.stdin.close()
             if hasattr(self, 'eargmd_proc') and self.eargmd_proc:
                 self.eargmd_proc.wait(timeout=5)
