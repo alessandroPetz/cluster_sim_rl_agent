@@ -1,7 +1,7 @@
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
-from sim_interface_exp1_cap import SimInterface
+from cluster_sim_rl_agent.sim_interface_exp1_new import SimInterface
 import os
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import CheckpointCallback
@@ -26,19 +26,25 @@ MAX_POWER_CLUSTER = NUM_NODES * MAX_POWER_NODE
 POWER_CAP_CLUSTER =  MAX_POWER_CLUSTER * POWERCAP_PERCENTAGE # 90%
 MAX_STRESS = 100 # ?
 
-# RL config
+# RL config - Version B: compact 6-dimensional action space
+# IMPORTANT: use separate paths because old 1025-action PPO checkpoints are incompatible.
 MODEL_DIR = "models"
-MODEL_PATH = os.path.join(MODEL_DIR, "ppo_powercap")
-VEC_PATH = os.path.join(MODEL_DIR, "vecnormalize.pkl")
+MODEL_PATH = os.path.join(MODEL_DIR, "ppo_powercap_vB6")
+VEC_PATH = os.path.join(MODEL_DIR, "vecnormalize_vB6.pkl")
+TENSORBOARD_LOG = "./logs/"
 TOTAL_TIMESTEPS = 1_000_000
 SAVE_FREQ = 10_000  # Save model every 10.000 timesteps
+
+ACTION_DIM = 6
+BETA_MIN = 0.25
+BETA_MAX = 6.0
 
 
 class PowercapEnv(gym.Env):
     """
     Custom Gym environment for powercap allocation in a cluster.
     Observation: powercap_status_t packed into numpy array.
-    Action: allocate extra_power to greedy nodes + cluster percentage.
+    Action: compact 6-parameter strategy converted into greedy-node extra power.
     """
     metadata = {'render.modes': ['human']}
 
@@ -72,23 +78,24 @@ class PowercapEnv(gym.Env):
         ]).astype(np.float32)
         self.observation_space = spaces.Box(low=obs_low, high=obs_high, dtype=np.float32)
 
-        # Define action space:
-        
-        # typedef struct powercap_opt{
-        #     uint32_t num_greedy;        /* Number of greedy nodes */
-        #     int32_t *greedy_nodes;      /* List of greedy nodes */
-        #     int32_t *extra_power;       /* Extra power received by each greedy node */
-        #     uint8_t cluster_perc_power; /* Percentage of total cluster power allocated */
-        # } powercap_opt_t;
-
-        # extra_power for each greedy node (int32) + cluster percentage (0-100)
-        # We simplify: action = [cluster_perc_power] + extra_power vector length=1024
-        # 1 value for cluster_perc_power, from 0 to 100
-        # 1024 values for extra_power, from 0 to MAX_EXTRA_POWER (one for every node, 0 if is not used (optionally))
-
-        act_low = np.concatenate([[0], np.zeros(NUM_NODES)])
-        act_high = np.concatenate([[100], np.ones(NUM_NODES) * MAX_POWER_NODE])
-        self.action_space = spaces.Box(low=act_low, high=act_high, dtype=np.float32)
+        # Version B action space: 6 normalized strategy parameters in [-1, 1].
+        #
+        # action[0] = rho: fraction of currently feasible EXTRA-power budget to use
+        # action[1] = weight for normalized requested power
+        # action[2] = weight for normalized stress
+        # action[3] = weight for already allocated extra power
+        # action[4] = weight for a new greedy node (requested > 0 and no previous extra)
+        # action[5] = concentration/aggressiveness of the priority distribution
+        #
+        # PPO therefore learns a compact allocation STRATEGY instead of directly
+        # controlling 1024 watt values. The environment converts these six values
+        # into a feasible per-greedy-node allocation and then into EAR deltas.
+        self.action_space = spaces.Box(
+            low=-1.0,
+            high=1.0,
+            shape=(ACTION_DIM,),
+            dtype=np.float32
+        )
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -131,19 +138,105 @@ class PowercapEnv(gym.Env):
         return flat
 
     
-    def _build_feasible_action(self, action):
-        """Build EAR deltas from PPO preferences, without a post-action shield.
+    @staticmethod
+    def _allocate_capped_weighted(weights, capacities, total_power):
+        """Allocate integer watts proportionally, respecting per-node capacities.
 
-        PPO action space is unchanged: [cluster_perc, 1024 nonnegative values].
-        Each value now controls the desired EXTRA-power allocation to a greedy
-        node. The resulting deltas may be negative to return previously granted
-        extra power. Assumes EAR applies extra_power as a delta and greedy[0]
-        is mapped correctly (EAR first-greedy v2 fix).
+        Any watts left because a node reaches its capacity are redistributed among
+        the remaining active nodes. The returned vector always satisfies:
+
+            0 <= allocation[i] <= capacities[i]
+            sum(allocation) <= total_power
+        """
+        capacities = np.asarray(capacities, dtype=np.int64)
+        weights = np.asarray(weights, dtype=np.float64)
+
+        target = np.zeros_like(capacities, dtype=np.int64)
+        if capacities.size == 0:
+            return target
+
+        total_power = int(max(0, total_power))
+        total_power = min(total_power, int(capacities.sum()))
+        remaining = total_power
+
+        while remaining > 0:
+            active = np.flatnonzero(target < capacities)
+            if active.size == 0:
+                break
+
+            active_weights = weights[active]
+            if (
+                not np.all(np.isfinite(active_weights))
+                or float(active_weights.sum()) <= 0.0
+            ):
+                active_weights = np.ones(active.size, dtype=np.float64)
+
+            active_weights = active_weights / active_weights.sum()
+            raw = remaining * active_weights
+            room = capacities[active] - target[active]
+
+            grant = np.minimum(np.floor(raw).astype(np.int64), room)
+            granted = int(grant.sum())
+
+            if granted > 0:
+                target[active] += grant
+                remaining -= granted
+                continue
+
+            # If remaining watts are fewer than active nodes, floor(raw) can be
+            # all zero. Assign one watt to the highest fractional priorities.
+            order = np.argsort(-raw, kind='stable')
+            count = min(remaining, active.size)
+            chosen = active[order[:count]]
+            target[chosen] += 1
+            remaining -= count
+
+        return target
+
+    def _build_feasible_action(self, action):
+        """Convert the compact Version-B PPO action into feasible EAR deltas.
+
+        The six PPO outputs are:
+            0: rho, fraction of feasible extra-power budget to use
+            1: requested-power weight
+            2: stress weight
+            3: previous-extra-power weight
+            4: new-greedy-node weight
+            5: concentration parameter for the node priority distribution
+
+        All PPO outputs live in [-1, 1]. Only rho is remapped to [0, 1].
+        The four feature weights remain signed. The last value is remapped to
+        beta in [BETA_MIN, BETA_MAX], where larger beta produces a more
+        concentrated allocation.
         """
         s = self.current_status
-        n = s.num_greedy
+        n = int(s.num_greedy)
         budget = int(POWER_CAP_CLUSTER)
         node_headroom = int(MAX_POWER_NODE - DEFAULT_POWER_NODE)
+
+        action = np.asarray(action, dtype=np.float64).reshape(-1)
+        if action.shape != (ACTION_DIM,):
+            raise ValueError(
+                f"Version-B action must have shape ({ACTION_DIM},), "
+                f"got {action.shape}"
+            )
+        if not np.all(np.isfinite(action)):
+            raise ValueError(f"NaN/Inf in Version-B action: {action}")
+
+        action = np.clip(action, -1.0, 1.0)
+
+        # Global decision: how much of the feasible EXTRA budget should be used?
+        rho = 0.5 * (action[0] + 1.0)
+
+        # State-dependent scoring parameters selected by PPO.
+        w_requested = action[1]
+        w_stress = action[2]
+        w_previous_extra = action[3]
+        w_new_greedy = action[4]
+
+        # Larger beta => stronger preference for the highest-scoring nodes.
+        beta01 = 0.5 * (action[5] + 1.0)
+        beta = BETA_MIN + beta01 * (BETA_MAX - BETA_MIN)
 
         previous_extra = np.array(
             [max(0, int(g.extra_power)) for g in s.greedy_data[:n]],
@@ -153,10 +246,13 @@ class PowercapEnv(gym.Env):
             [max(0, int(g.requested)) for g in s.greedy_data[:n]],
             dtype=np.int64
         )
+        stress = np.array(
+            [max(0, min(MAX_STRESS, int(g.stress))) for g in s.greedy_data[:n]],
+            dtype=np.float64
+        )
 
-        # The status may report nodes being restored to their default cap:
-        # 'requested' at cluster level accounts for this mandatory allocation.
-        # Remove only already-granted EXTRA allocations from the baseline.
+        # Mandatory/base allocation. Existing greedy extra is removed here and
+        # reintroduced through target[] below, so PPO can also decide to return it.
         fixed_allocation = (
             int(s.total_powercap)
             + max(0, int(s.requested))
@@ -171,51 +267,93 @@ class PowercapEnv(gym.Env):
                 "This cannot be fixed by redistributing greedy extra power."
             )
 
-        # Each greedy node may keep its existing extra and receive up to its
-        # unsatisfied request, without exceeding MAX_POWER_NODE.
-        max_extra = np.minimum(node_headroom, previous_extra + requested)
-
-        # Same PPO outputs, interpreted as allocation intensities instead of
-        # integer watt deltas. Small positive outputs remain meaningful.
-        intensity = np.nan_to_num(
-            np.asarray(action[1:1 + n], dtype=np.float64),
-            nan=0.0, posinf=MAX_POWER_NODE, neginf=0.0
-        )
-        intensity = np.clip(intensity, 0.0, MAX_POWER_NODE)
-        desired = np.rint(
-            max_extra * (-np.expm1(-intensity))
+        # Maximum FINAL extra allocation allowed for each greedy node.
+        # requested is interpreted as still-unsatisfied extra demand.
+        max_extra = np.minimum(
+            node_headroom,
+            previous_extra + requested
         ).astype(np.int64)
 
-        # Allocate at most the available watts. When there are more requests
-        # than power, proportionally distribute the available power using
-        # integer largest-remainder allocation (sum never exceeds the cap).
-        total_desired = int(desired.sum())
-        if total_desired > free_for_extra:
-            shares = desired.astype(np.float64) * (
-                free_for_extra / total_desired
-            )
-            target = np.floor(shares).astype(np.int64)
-            remaining = free_for_extra - int(target.sum())
-            if remaining:
-                order = np.argsort(-(shares - target), kind='stable')
-                target[order[:remaining]] += 1
-        else:
-            target = desired
+        # Normalize per-node features to comparable [0, 1] scales.
+        denom = float(max(1, node_headroom))
+        requested_norm = np.clip(requested / denom, 0.0, 1.0)
+        stress_norm = np.clip(stress / float(MAX_STRESS), 0.0, 1.0)
+        previous_extra_norm = np.clip(previous_extra / denom, 0.0, 1.0)
+        new_greedy = ((requested > 0) & (previous_extra == 0)).astype(np.float64)
 
-        # EAR expects DELTAS, not final extra-power allocations.
+        # PPO does not choose per-node watts. It chooses how node features should
+        # be valued in this state. The resulting score is converted to a positive
+        # priority distribution with a stable softmax.
+        scores = (
+            w_requested * requested_norm
+            + w_stress * stress_norm
+            + w_previous_extra * previous_extra_norm
+            + w_new_greedy * new_greedy
+        )
+
+        if n > 0:
+            logits = beta * scores
+            logits = logits - np.max(logits)
+            priorities = np.exp(logits)
+            priorities[max_extra <= 0] = 0.0
+
+            if float(priorities.sum()) <= 0.0:
+                priorities = (max_extra > 0).astype(np.float64)
+        else:
+            priorities = np.empty(0, dtype=np.float64)
+
+        # rho decides HOW MUCH extra power to use. This is deliberately separate
+        # from the node priorities, which decide WHERE that power should go.
+        available_extra = min(
+            int(free_for_extra),
+            int(max_extra.sum())
+        )
+        power_to_allocate = int(np.rint(rho * available_extra))
+
+        target = self._allocate_capped_weighted(
+            priorities,
+            max_extra,
+            power_to_allocate
+        )
+
+        # EAR expects DELTAS relative to already allocated extra power.
         delta = target - previous_extra
+
+        # Do not spend one PPO output on this bookkeeping field. Mimic the hard
+        # policy convention: report the fraction of the global budget currently
+        # represented by total_powercap. The actual node-level control is delta[].
+        if budget > 0:
+            cluster_perc_power = int(np.clip(
+                np.rint(100.0 * int(s.total_powercap) / budget),
+                0,
+                100
+            ))
+        else:
+            cluster_perc_power = 0
+
+        # Small diagnostic payload; useful when inspecting learning behavior.
+        self.last_action_debug = {
+            'rho': float(rho),
+            'w_requested': float(w_requested),
+            'w_stress': float(w_stress),
+            'w_previous_extra': float(w_previous_extra),
+            'w_new_greedy': float(w_new_greedy),
+            'beta': float(beta),
+            'free_for_extra': int(free_for_extra),
+            'available_extra': int(available_extra),
+            'target_extra': int(target.sum()),
+            'previous_extra': int(previous_extra.sum()),
+            'delta_extra': int(delta.sum()),
+        }
+
         return {
             'num_greedy': n,
             'greedy_nodes': s.greedy_nodes,
             'extra_power': delta.astype(np.int32).tolist(),
-            'cluster_perc_power': int(action[0])
+            'cluster_perc_power': cluster_perc_power
         }
 
     def step(self, action):
-
-        # rho = 100%
-        action = np.array([1, 0, 0, 0, 0, 0], dtype=np.float32)
-
 
         opt = self._build_feasible_action(action)
 
@@ -256,7 +394,7 @@ class PowercapEnv(gym.Env):
             raise ValueError(
                 f"Invalid reward: {reward}"
             )
-        return obs, reward, done, truncated, {}
+        return obs, reward, done, truncated, dict(self.last_action_debug)
 
 
     def render(self, mode='human'):
@@ -324,7 +462,7 @@ if __name__ == '__main__':
             # If exsist a model, we continue from this one
             if os.path.exists(MODEL_PATH + ".zip"):
                 print("[Main] Upload  Model from Model Path")
-                model = PPO.load(MODEL_PATH, env=env, device="cpu", tensorboard_log="./logs/")
+                model = PPO.load(MODEL_PATH, env=env, device="cpu", tensorboard_log=TENSORBOARD_LOG)
 
                 # controllo che non sia corrotto da nan/inf
                 for name, param in model.policy.named_parameters():
@@ -348,51 +486,45 @@ if __name__ == '__main__':
                 #     env,
                 #     verbose=1,
                 #     device="cpu",
-                #     tensorboard_log="./logs/",
+                #     tensorboard_log=TENSORBOARD_LOG,
                 #     n_steps=8000,
                 #     batch_size=32,
                 #     policy_kwargs=policy_kwargs,
                 #     seed=SEED
                 # )
-                model = PPO(
-                    "MlpPolicy",
-                    env,
-                    verbose=1,
-                    device="cpu",
-                    tensorboard_log="./logs/",
-
-                    n_steps=2048,
-                    batch_size=256,
-                    learning_rate=1e-4,
-                    n_epochs=10,
-
-                    gamma=0.99,
-                    gae_lambda=0.95,
-
-                    clip_range=0.2,
-                    target_kl=0.03,
-                    max_grad_norm=0.5,
-
-                    policy_kwargs=policy_kwargs,
-                    seed=SEED
-                )
-
                 # model = PPO(
                 #     "MlpPolicy",
                 #     env,
                 #     verbose=1,
                 #     device="cpu",
-                #     tensorboard_log="./logs/",
+                #     tensorboard_log=TENSORBOARD_LOG,
                 #     n_steps=8000,
-                #     batch_size=250,
-                #     learning_rate=1e-5,
+                #     batch_size=256,
+                #     learning_rate=3e-5,
                 #     n_epochs=5,
                 #     clip_range=0.2,
-                #     target_kl=0.05,
+                #     target_kl=0.02,
                 #     max_grad_norm=0.5,
                 #     policy_kwargs=policy_kwargs,
                 #     seed=SEED
                 # )
+
+                model = PPO(
+                    "MlpPolicy",
+                    env,
+                    verbose=1,
+                    device="cpu",
+                    tensorboard_log=TENSORBOARD_LOG,
+                    n_steps=8000,
+                    batch_size=250,
+                    learning_rate=1e-4,
+                    n_epochs=5,
+                    clip_range=0.2,
+                    target_kl=0.05,
+                    max_grad_norm=0.5,
+                    policy_kwargs=policy_kwargs,
+                    seed=SEED
+                )
 
                     
 
@@ -400,7 +532,7 @@ if __name__ == '__main__':
             checkpoint_callback = CheckpointCallback(
                 save_freq=SAVE_FREQ,
                 save_path=MODEL_DIR,
-                name_prefix="ppo_powercap",
+                name_prefix="ppo_powercap_vB6",
                 save_replay_buffer=True,
                 save_vecnormalize=True
             )
