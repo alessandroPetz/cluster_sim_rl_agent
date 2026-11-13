@@ -1,7 +1,7 @@
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
-from cluster_sim_rl_agent.sim_interface_exp1_new import SimInterface
+from sim_interface_exp1_new import SimInterface
 import os
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import CheckpointCallback
@@ -17,7 +17,7 @@ import torch
 NUM_JOBS = 2000
 NUM_NODES = 1024
 WORKLOAD_VERSION = 60
-POWERCAP_PERCENTAGE = 0.8
+POWERCAP_PERCENTAGE = 0.9
 MAX_POWER_NODE = 850
 DEFAULT_POWER_NODE = MAX_POWER_NODE * POWERCAP_PERCENTAGE   # 850 * 0.8 = 680; 850 * 0.9 = 765
 
