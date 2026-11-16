@@ -16,7 +16,7 @@ import torch
 
 NUM_JOBS = 2000
 NUM_NODES = 1024
-WORKLOAD_VERSION = 60
+WORKLOAD_VERSION = 120
 POWERCAP_PERCENTAGE = 0.9
 MAX_POWER_NODE = 850
 DEFAULT_POWER_NODE = MAX_POWER_NODE * POWERCAP_PERCENTAGE   # 850 * 0.8 = 680; 850 * 0.9 = 765
@@ -28,10 +28,12 @@ MAX_STRESS = 100 # ?
 
 # RL config - Version B: compact 6-dimensional action space
 # IMPORTANT: use separate paths because old 1025-action PPO checkpoints are incompatible.
-MODEL_DIR = "models"
+
+CASE_NAME = f"{WORKLOAD_VERSION}_{int(POWERCAP_PERCENTAGE * 100)}"
+MODEL_DIR = f"models_{CASE_NAME}"
 MODEL_PATH = os.path.join(MODEL_DIR, "ppo_powercap_vB6")
 VEC_PATH = os.path.join(MODEL_DIR, "vecnormalize_vB6.pkl")
-TENSORBOARD_LOG = "./logs/"
+TENSORBOARD_LOG = f"./logs_{CASE_NAME}/"
 TOTAL_TIMESTEPS = 1_000_000
 SAVE_FREQ = 10_000  # Save model every 10.000 timesteps
 
