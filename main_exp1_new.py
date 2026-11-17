@@ -16,8 +16,9 @@ import torch
 
 NUM_JOBS = 2000
 NUM_NODES = 1024
-WORKLOAD_VERSION = 120
-POWERCAP_PERCENTAGE = 0.9
+WORKLOAD_VERSION = 60
+POWERCAP_PERCENTAGE = 0.8
+
 MAX_POWER_NODE = 850
 DEFAULT_POWER_NODE = MAX_POWER_NODE * POWERCAP_PERCENTAGE   # 850 * 0.8 = 680; 850 * 0.9 = 765
 
@@ -29,11 +30,10 @@ MAX_STRESS = 100 # ?
 # RL config - Version B: compact 6-dimensional action space
 # IMPORTANT: use separate paths because old 1025-action PPO checkpoints are incompatible.
 
-CASE_NAME = f"{WORKLOAD_VERSION}_{int(POWERCAP_PERCENTAGE * 100)}"
-MODEL_DIR = f"models_{CASE_NAME}"
+MODEL_DIR = f"models"
 MODEL_PATH = os.path.join(MODEL_DIR, "ppo_powercap_vB6")
 VEC_PATH = os.path.join(MODEL_DIR, "vecnormalize_vB6.pkl")
-TENSORBOARD_LOG = f"./logs_{CASE_NAME}/"
+TENSORBOARD_LOG = f"./logs/"
 TOTAL_TIMESTEPS = 1_000_000
 SAVE_FREQ = 10_000  # Save model every 10.000 timesteps
 
@@ -321,6 +321,21 @@ class PowercapEnv(gym.Env):
         # EAR expects DELTAS relative to already allocated extra power.
         delta = target - previous_extra
 
+        positive_delta = np.maximum(delta, 0)
+
+        # check if is bad
+        # bad = np.where(positive_delta > requested)[0]
+
+        # if bad.size > 0:
+        #     raise RuntimeError(
+        #         f"RL OVER-REQUEST: "
+        #         f"idx={bad[:20]}, "
+        #         f"delta={positive_delta[bad[:20]]}, "
+        #         f"requested={requested[bad[:20]]}, "
+        #         f"previous={previous_extra[bad[:20]]}, "
+        #         f"target={target[bad[:20]]}"
+        #     )
+
         # Do not spend one PPO output on this bookkeeping field. Mimic the hard
         # policy convention: report the fraction of the global budget currently
         # represented by total_powercap. The actual node-level control is delta[].
@@ -356,7 +371,7 @@ class PowercapEnv(gym.Env):
         }
 
     def step(self, action):
-
+        
         opt = self._build_feasible_action(action)
 
         # print("\n--- ACTION DEBUG ---")
