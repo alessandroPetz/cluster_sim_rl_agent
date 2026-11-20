@@ -11,27 +11,38 @@ num_nodes=1024
 perc_cluster=120  # carico workload indicativo
 num_jobs=2000
 def_power_cap=680
+#def_power_cap=765
 #################################
 
-# folder_test= ""
+
 # folder_test= "overhead_test_input/"
-folder_test= "cpu_mem_mix_test_input/"
 
 
+# # exp1 e exp2
+# folder_test= ""
 # file_cluster_arch = f"cluster_{num_nodes}nodes.xml"
 # file_power_profile = f"power_{num_jobs}jobs.txt"
 # file_workload = f"workload_{num_jobs}jobs_{num_nodes}nodes_{perc_cluster}.json"
 
-# name folder for sensitivity analysis
+# # exp3
+folder_test= ""
+file_cluster_arch = f"cluster_{num_nodes}nodes.xml"
+file_power_profile = f"power_{num_jobs}jobs_mixed.txt"
+file_workload = f"workload_{num_jobs}jobs_{num_nodes}nodes_{perc_cluster}.json"
+
+# sensitivity analysis
 # 1 = 100 0 0
 # 2 = 33 33 33 
 # 3 = 60 20 20 
 # 4 = 20 60 20 
-# 5 = 20 20 60  
-numtest=1
-file_cluster_arch = f"cluster_{num_nodes}nodes.xml"
-file_power_profile = f"power_{num_jobs}jobs_{numtest}.txt"
-file_workload = f"workload_{num_jobs}jobs_{num_nodes}nodes_{perc_cluster}.json"
+# 5 = 20 20 60
+# folder_test= "cpu_mem_mix_test_input/"
+# perc_cluster=120    # fisso
+# def_power_cap=680   # fisso
+# numtest=1
+# file_cluster_arch = f"cluster_{num_nodes}nodes.xml"
+# file_power_profile = f"power_{num_jobs}jobs_{numtest}.txt"
+# file_workload = f"workload_{num_jobs}jobs_{num_nodes}nodes_{perc_cluster}.json"
 
 
 def kill_processes_by_name(name: str):

@@ -405,7 +405,7 @@ class SimInterface:
             [
                 f"{workspace}/source/ear_private/src/tools/cluster_sim",
                 "test_tag",
-                f"../input_files/power_{self.num_jobs}jobs_mixed.txt" 
+                f"../input_files/power_{self.num_jobs}jobs.txt" 
                 
             ],
             env=env_cluster_sim,
