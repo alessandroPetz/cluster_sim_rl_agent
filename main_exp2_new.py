@@ -411,7 +411,7 @@ if __name__ == '__main__':
     os.makedirs(MODEL_DIR, exist_ok=True)
 
     # Keep the original experiment-2 train/test cycle.
-    TRAIN_STEPS = 8_000
+    TRAIN_STEPS = 16_000
     TEST_STEPS = 4_000
 
     while True:
