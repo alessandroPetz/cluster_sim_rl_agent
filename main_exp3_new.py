@@ -468,7 +468,7 @@ if __name__ == '__main__':
                     tensorboard_log=TENSORBOARD_LOG,
                     n_steps=8000,
                     batch_size=250,
-                    learning_rate=1e-4,
+                    learning_rate=1e-5,
                     n_epochs=5,
                     clip_range=0.2,
                     target_kl=0.05,
