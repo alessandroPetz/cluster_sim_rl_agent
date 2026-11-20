@@ -6,7 +6,7 @@
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
-from sim_interface_exp2_new import SimInterface
+from sim_interface_exp3_new import SimInterface
 import os
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize, VecCheckNan
